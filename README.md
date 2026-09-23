@@ -1,4 +1,4 @@
-# SandboxTune
+# SuperTaco
 
 AI-supervised fine-tuning sandbox for the Nebius x NVIDIA Global AI Hackathon.
 
