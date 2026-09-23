@@ -1,8 +1,8 @@
 """SandboxTune CLI entry point.
 
 Usage:
-    sandboxtune run <config> [--dry-run]
-    sandboxtune --help
+    supertaco run <config> [--dry-run]
+    supertaco --help
 """
 
 import argparse
@@ -10,11 +10,11 @@ import sys
 import os
 from pathlib import Path
 
-from sandboxtune.settings import SandboxTuneSettings
-from sandboxtune.nebius.jobs import NebiusJobClient
-from sandboxtune.nebius.endpoints import NebiusEndpointClient
-from sandboxtune.agent.graph import run_agent_graph
-from sandboxtune.errors import MaxRetriesExceeded
+from supertaco.settings import SandboxTuneSettings
+from supertaco.nebius.jobs import NebiusJobClient
+from supertaco.nebius.endpoints import NebiusEndpointClient
+from supertaco.agent.graph import run_agent_graph
+from supertaco.errors import MaxRetriesExceeded
 
 
 def main():

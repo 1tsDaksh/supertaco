@@ -1,5 +1,5 @@
 import time
-from sandboxtune.errors import ConfigurationError
+from supertaco.errors import ConfigurationError
 
 
 class NemotronClient:

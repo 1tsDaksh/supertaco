@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from typing import Dict, Any, Optional, Literal
-from sandboxtune.agent.playbook import detect_failure, apply_default_fix
-from sandboxtune.agent.llm import NemotronClient
-from sandboxtune.errors import MaxRetriesExceeded
+from supertaco.agent.playbook import detect_failure, apply_default_fix
+from supertaco.agent.llm import NemotronClient
+from supertaco.errors import MaxRetriesExceeded
 
 
 # Type definitions for the state graph
@@ -56,7 +56,7 @@ def propose_patch_node(state: State) -> State:
         return {**state, "patch_proposed": False, "error": "No failure detected"}
 
     # Use LLM to propose patch
-    from sandboxtune.agent.llm import NemotronClient
+    from supertaco.agent.llm import NemotronClient
 
     client = NemotronClient(
         base_url=config.get("token_factory_base_url", ""),
@@ -84,7 +84,7 @@ def propose_patch_node(state: State) -> State:
 def launch_job_node(state: State) -> State:
     """LangGraph node: launch the training job."""
     config = state.get("config", {})
-    from sandboxtune.nebius.jobs import NebiusJobClient
+    from supertaco.nebius.jobs import NebiusJobClient
 
     # In real implementation, would use the actual client
     # For now, simulate job launch

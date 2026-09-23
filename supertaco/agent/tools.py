@@ -1,15 +1,15 @@
 import json
 import subprocess
-from sandboxtune.nebius.jobs import NebiusJobClient
-from sandboxtune.nebius.endpoints import NebiusEndpointClient
-from sandboxtune.agent.playbook import detect_failure, apply_default_fix
-from sandboxtune.agent.llm import NemotronClient
-from sandboxtune.errors import MaxRetriesExceeded
+from supertaco.nebius.jobs import NebiusJobClient
+from supertaco.nebius.endpoints import NebiusEndpointClient
+from supertaco.agent.playbook import detect_failure, apply_default_fix
+from supertaco.agent.llm import NemotronClient
+from supertaco.errors import MaxRetriesExceeded
 
 
 def patch_config(config: dict, fix_description: str) -> dict:
     """Apply a config patch based on a fix description. Returns new config dict."""
-    from sandboxtune.agent.playbook import apply_default_fix
+    from supertaco.agent.playbook import apply_default_fix
     new_config = apply_default_fix(fix_description, config) if fix_description else config
     # If fix_description is a key from playbook, use default fixes
     # Otherwise, use LLM-proposed fix

@@ -1,5 +1,5 @@
 import httpx
-from sandboxtune.errors import JobFailedError
+from supertaco.errors import JobFailedError
 
 
 class NebiusJobClient:

@@ -1,4 +1,4 @@
-from sandboxtune.errors import MaxRetriesExceeded
+from supertaco.errors import MaxRetriesExceeded
 
 # Playbook v1 — 8 failure modes with typed detection signals and default fixes
 PLAYBOOK = {
