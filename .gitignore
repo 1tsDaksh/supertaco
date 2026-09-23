@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.dist/
+.build/
+env/
+venv/
+.venv/
+
+# Environment variables
+.env
+.env.local
+
+# Secrets and tokens
+*.key
+*.pem
+secrets.json
+
+# Logs
+logs/*.jsonl
+logs/*.log
+
+# Configs runs (generated, not committed except examples)
+configs/runs/*
+!configs/runs/*_example.yaml
+
+# Streamlit
+.streamlit/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
