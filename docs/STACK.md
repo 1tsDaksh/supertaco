@@ -36,7 +36,7 @@ misses. Log every escalation.
 
 ## Tooling versions
 - ruff ^0.8 (lint + format)
-- mypy ^1.13 (strict mode on `src/`)
+- mypy ^1.13 (strict mode on `supertaco/`)
 - pytest ^8.3 + pytest-asyncio ^0.24
 
 ## Environment variables (.env, gitignored)
