@@ -20,7 +20,7 @@ import yaml
 # ─── Load settings directly from .env (no package import needed) ────────────
 def _load_env():
     """Load .env file manually if present, otherwise fall back to os.environ."""
-    env_path = Path(__file__).resolve().parent.parent / ".env"
+    env_path = Path(__file__).resolve().parents[2] / ".env"
     if env_path.exists():
         with open(env_path, "r") as f:
             for line in f:
