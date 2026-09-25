@@ -1,11 +1,10 @@
-from supertaco.errors import MaxRetriesExceeded
+from supertaco.errors import ConfigurationError
 
 # Playbook v1 — 8 failure modes with typed detection signals and default fixes
 PLAYBOOK = {
     "NAN_LOSS": {
         "detection": lambda log: any(
-            "NaN" in line and "loss" in line.lower()
-            for line in log.splitlines()[-20:]
+            "NaN" in line and "loss" in line.lower() for line in log.splitlines()[-20:]
         ),
         "default_fix": "lower_lr_10x",
         "description": "Loss is NaN in first N steps",
@@ -37,7 +36,10 @@ PLAYBOOK = {
         "description": "No improvement over K evals",
     },
     "EVAL_REGRESSION": {
-        "detection": lambda log: isinstance(log, dict) and log.get("regression", False),
+        "detection": lambda log: (
+            (isinstance(log, dict) and log.get("regression", False))
+            or (isinstance(log, str) and "eval" in log.lower() and "regression" in log.lower())
+        ),
         "default_fix": "lower_lora_rank_alpha_fewer_epochs_stronger_regularization",
         "description": "Post-train eval < baseline",
     },
@@ -114,7 +116,9 @@ def _loss_divergence_detected(log: str) -> bool:
         return False
     # Check if values are generally increasing
     first_half_avg = sum(loss_values[: len(loss_values) // 2]) / (len(loss_values) // 2)
-    second_half_avg = sum(loss_values[len(loss_values) // 2 :]) / (len(loss_values) - len(loss_values) // 2)
+    second_half_avg = sum(loss_values[len(loss_values) // 2 :]) / (
+        len(loss_values) - len(loss_values) // 2
+    )
     return second_half_avg > first_half_avg * 1.1
 
 

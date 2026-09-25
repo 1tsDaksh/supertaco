@@ -24,6 +24,7 @@ and LLaMA-Factory + LoRA for the actual training.
 verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
+- 2026-09-24: Playbook: EVAL_REGRESSION detects log text; ConfigurationError import fixed (plan Task 2).
 - 2026-09-22: Wrote agent docs (AGENTS/PROJECT/STACK/CONVENTIONS/SPEC). Repo scaffolded.
 
 ## Up next (rough order)
