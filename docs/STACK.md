@@ -1,10 +1,9 @@
 # STACK.md — Exact Versions & Dependencies
 
-**Package manager: `uv` (Python). Do not use pip / conda / poetry.**
+**Package manager: pip (Python). Prefer deps declared in pyproject.toml; avoid ad-hoc installs.**
 
 ## Language & runtime
-- Python **3.11.x** (pin: `>=3.11,<3.12`)
-- `uv` >= 0.5
+- Python **3.11+** (pin: `>=3.11`)
 
 ## Core dependencies (pyproject.toml)
 | Package | Version constraint | Why |
@@ -53,4 +52,4 @@ SANDBOXTUNE_ENV=dev        # dev | prod — prod blocks dry-run-only bypasses
 - Do not use `langchain` (monolith) — only `langchain-core`.
 - Do not use `transformers` Trainer directly — LLaMA-Factory only.
 - Do not use `requests` — use `httpx` if needed.
-- Do not use pip, conda, or poetry anywhere in the repo.
+- Do not use conda or poetry anywhere in the repo.

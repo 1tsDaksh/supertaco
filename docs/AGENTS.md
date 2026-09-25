@@ -3,7 +3,7 @@
 > Read this file at the start of every session. It defines how you work, not just what you build.
 
 ## Mission
-You are the AI coding agent for **SandboxTune** — an AI-supervised fine-tuning sandbox built for the
+You are the AI coding agent for **SuperTaco** — an AI-supervised fine-tuning sandbox built for the
 Nebius x NVIDIA Global AI Hackathon. Your job is to build, test, and ship code that lets an agent
 launch, monitor, diagnose, and repair LLM fine-tuning jobs running on Nebius AI Cloud.
 
@@ -32,24 +32,24 @@ launch, monitor, diagnose, and repair LLM fine-tuning jobs running on Nebius AI 
 
 ```bash
 # Setup (first time)
-uv sync
+pip install -e .
 
 # Lint + typecheck — run before every commit
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy src/
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy supertaco/
 
 # Unit tests (mocked Nebius API — no credits spent)
-uv run pytest tests/ -m "not integration"
+python -m pytest tests/ -m "not integration"
 
 # Integration test (hits real Nebius API — costs money, needs explicit flag)
-uv run pytest tests/ -m integration --api-key $NEBIUS_API_KEY
+python -m pytest tests/ -m integration
 
 # Dry-run the agent loop on a deliberately broken config (free)
-uv run python -m sandboxtune.cli run configs/runs/broken_nan_loss.yaml --dry-run
+python -m supertaco.cli run configs/runs/20260923_191506_NAN_LOSS_broken_model.yaml --dry-run
 
 # Full smoke test (real job, single GPU, < 60 min, requires approval)
-uv run python -m sandboxtune.cli run configs/runs/smoke_test.yaml
+python -m supertaco.cli run configs/runs/20260923_191506_NAN_LOSS_broken_model.yaml
 ```
 
 ## Style guardrails
@@ -58,7 +58,7 @@ uv run python -m sandboxtune.cli run configs/runs/smoke_test.yaml
 - All public functions have docstrings (Google style). Private helpers docstring only if non-obvious.
 - Pydantic v2 models for all config and API payloads. No raw dicts crossing module boundaries.
 - Structured logging via `structlog` — never `print()` in library code.
-- Errors: raise typed exceptions (`sandboxtune.errors.JobFailedError`) — no bare `except`, no swallowed exceptions.
+- Errors: raise typed exceptions (`supertaco.errors.JobFailedError`) — no bare `except`, no swallowed exceptions.
 - Agent-facing code (LangGraph nodes) must be deterministic given a fixed seed; log every LLM call
   (model, tokens, latency) to `logs/llm_calls.jsonl`.
 

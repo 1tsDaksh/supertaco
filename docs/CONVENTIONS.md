@@ -2,8 +2,8 @@
 
 ## Folder structure
 ```
-sandboxtune/               # src package
-  cli.py                   # entry point: `sandboxtune run <config> [--dry-run]`
+supertaco/                 # src package
+  cli.py                   # entry point: `supertaco run <config> [--dry-run]`
   settings.py              # pydantic-settings, env loading
   errors.py                # typed exceptions
   nebius/
@@ -51,7 +51,7 @@ docs/                      # hackathon notes, feedback draft, demo script
 
 ## Git discipline
 - Conventional commits: `feat(agent): add OOM failure mode`, `fix(eval): judge timeout`.
-- No commit may contain real API keys, run outputs > 10 MB, or `configs/runs/` (except `*_example.yaml`).
+- No commit may contain real API keys, run outputs > 10 MB, or `configs/runs/` (except `*_example.yaml` and `*_broken_model.yaml`).
 - Every PR/commit message ends with what was tested and how (one line).
 
 ## Agent-loop invariants (tests enforce these)
