@@ -1,0 +1,9 @@
+batch_size: 8
+chat_template: llama-3
+data_format: plain_text
+gradient_clip_norm: 1.0
+learning_rate: 1.0e-06
+lora_alpha: 16
+lora_r: 8
+model: llama-3-8b
+num_epochs: 1
