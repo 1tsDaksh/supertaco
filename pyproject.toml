@@ -1,13 +1,13 @@
 [build-system]
 requires = ["setuptools>=68.0", "pip"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
-name = "sandboxtune"
+name = "supertaco"
 version = "0.1.0"
 description = "AI-supervised fine-tuning sandbox for Nebius x NVIDIA Hackathon"
 
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.11"
 
 dependencies = [
     "langgraph>=0.6",
@@ -20,22 +20,36 @@ dependencies = [
     "streamlit>=1.4",
     "datasets>=3.0",
     "tavily-python>=0.5",
-]
-
-dev-dependencies = [
-    "ruff>=0.8",
-    "mypy>=1.13",
-    "pytest>=8.3",
-    "pytest-asyncio>=0.24",
+    "plotly>=5.0",
     "pyyaml>=6.0",
 ]
 
 [project.scripts]
-sandboxtune = "sandboxtune.cli:main"
+supertaco = "supertaco.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["supertaco*"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+]
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "TID", "B90"]
 
-[tool.mypy.disallow_untyped_defs] = false
-[tool.mypy.disallow_untyped_calls] = false
+[tool.mypy]
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: hits real APIs and costs money (deselect with -m 'not integration')",
+]
