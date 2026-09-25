@@ -33,6 +33,7 @@ launch, monitor, diagnose, and repair LLM fine-tuning jobs running on Nebius AI 
 ```bash
 # Setup (first time)
 pip install -e .
+pip install --group dev
 
 # Lint + typecheck — run before every commit
 python -m ruff check .

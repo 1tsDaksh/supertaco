@@ -18,6 +18,9 @@
 | streamlit | ^1.4x | Dashboard UI |
 | datasets | ^3.x | HF dataset loading for eval suite |
 | tavily-python | ^0.5 | Error-context search (prize category) |
+| plotly | ^5.0 | Dashboard charts |
+| pyyaml | ^6.0 | YAML config parsing (dashboard) |
+| httpx | ^0.27 | HTTP client used by `supertaco/nebius/jobs.py` |
 
 ## Model endpoints (Nebius Token Factory, OpenAI-compatible)
 | Role | Model ID | Use |
@@ -36,7 +39,7 @@ misses. Log every escalation.
 
 ## Tooling versions
 - ruff ^0.8 (lint + format)
-- mypy ^1.13 (strict mode on `supertaco/`)
+- mypy ^1.13 (on `supertaco/`)
 - pytest ^8.3 + pytest-asyncio ^0.24
 
 ## Environment variables (.env, gitignored)
