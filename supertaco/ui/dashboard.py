@@ -105,7 +105,7 @@ def detect_failure(log: str) -> Optional[str]:
         recent = losses[-10:]
         if abs(recent[0] - recent[-1]) < 0.5:
             return "LOSS_PLATEAU"
-    if "regression" in log.lower() and "eval" in log.lower():
+    if any("eval" in ln and "regression" in ln for ln in log.lower().splitlines()):
         return "EVAL_REGRESSION"
     if any("tokenizer" in ln.lower() or "template" in ln.lower() for ln in lines[-30:]):
         return "TOKENIZER_MISMATCH"

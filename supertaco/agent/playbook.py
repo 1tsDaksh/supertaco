@@ -37,8 +37,8 @@ PLAYBOOK = {
     },
     "EVAL_REGRESSION": {
         "detection": lambda log: (
-            (isinstance(log, dict) and log.get("regression", False))
-            or (isinstance(log, str) and "eval" in log.lower() and "regression" in log.lower())
+            isinstance(log, str)
+            and any("eval" in ln and "regression" in ln for ln in log.lower().splitlines())
         ),
         "default_fix": "lower_lora_rank_alpha_fewer_epochs_stronger_regularization",
         "description": "Post-train eval < baseline",
