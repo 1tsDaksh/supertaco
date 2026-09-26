@@ -285,7 +285,7 @@ HEALTHY = {"learning_rate": 2e-5, "batch_size": 8, "lora_r": 8,
 
 def _fixture(mode: str) -> dict:
     import yaml
-    matches = [p for p in RUNS.glob("*.yaml") if mode in p.name]
+    matches = [p for p in RUNS.glob("*.yaml") if mode in p.name and "_patched" not in p.name]
     assert matches, f"no fixture for {mode}"
     return yaml.safe_load(matches[0].read_text(encoding="utf-8"))
 
@@ -338,6 +338,34 @@ def test_divergence_series_increases():
 def test_nan_series_contains_nan():
     pts = extract_loss_points(generate_logs(_fixture("NAN_LOSS")))
     assert any(math.isnan(v) for v in pts)
+
+
+def test_precedence_multi_trigger_configs_surface_first_rule():
+    # The rule order is load-bearing for multi-trigger healing chains: the
+    # FIRST matching rule must win regardless of what else the config trips.
+    assert classify_config_failure({"batch_size": 64, "learning_rate": 0.1}) == "OOM"
+    assert classify_config_failure({"batch_size": 64, "num_workers": 20}) == "OOM"
+    assert classify_config_failure(
+        {"learning_rate": 0.1, "lora_r": 64, "num_epochs": 10}
+    ) == "LOSS_DIVERGENCE"
+    assert classify_config_failure(
+        {"learning_rate": 1e-4, "lora_r": 64, "num_epochs": 10,
+         "chat_template": "llama-3", "gradient_clip_norm": 1.0}
+    ) == "EVAL_REGRESSION"
+
+
+@pytest.mark.parametrize("config,mode", [
+    ({"batch_size": 32, "learning_rate": 2e-5}, None),
+    ({"batch_size": 33, "learning_rate": 2e-5}, "OOM"),
+    ({"learning_rate": 0.04999}, None),
+    ({"learning_rate": 0.05, "chat_template": None}, "NAN_LOSS"),
+    ({"learning_rate": 1.5e-6}, None),
+    ({"learning_rate": 1.4e-6}, "LOSS_PLATEAU"),
+    ({"learning_rate": 2e-5, "lora_r": 31, "num_epochs": 10}, None),
+    ({"learning_rate": 2e-5, "lora_r": 32, "num_epochs": 10}, "EVAL_REGRESSION"),
+])
+def test_rule_table_boundaries(config, mode):
+    assert classify_config_failure(config) == mode
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -370,7 +398,8 @@ LOSS_RE = re.compile(r"\bloss\s+([0-9]+\.[0-9]+|NaN)\b")
 def classify_config_failure(config: dict) -> Optional[str]:
     """Return the failure mode a config would trigger, or None if healthy.
 
-    Missing keys are read as None/0. Precedence order is significant: it is
+    Missing keys are read as None/0 (num_epochs defaults to 3). Precedence
+    order is significant: it is
     the order modes surface across relaunches for multi-trigger configs.
     """
     lr = float(config.get("learning_rate") or 0)
@@ -409,11 +438,11 @@ def _header(config: dict) -> str:
     )
 
 
-def _healthy_logs() -> str:
+def _healthy_logs(config: dict) -> str:
     # Decay chosen so playbook's plateau window (last 10, must differ by >= 0.5)
     # and divergence check (second half not > 1.1x first) both stay negative.
     lines = [f"step {i} loss {2.4 - i * 0.06:.3f}" for i in range(30)]
-    return _header({}) + "\n".join(lines) + "\ntraining finished (dry-run)\n"
+    return _header(config) + "\n".join(lines) + "\ntraining finished (dry-run)\n"
 
 
 def _nan_logs(config: dict) -> str:
@@ -495,7 +524,7 @@ def generate_logs(config: dict) -> str:
     """Return the training log a run with this config would produce."""
     mode = classify_config_failure(config)
     if mode is None:
-        return _healthy_logs()
+        return _healthy_logs(config)
     return _EMITTERS[mode](config)
 
 
@@ -514,7 +543,7 @@ def extract_loss_points(log_text: str) -> list[float]:
 python -m pytest tests/test_simlogs.py -v
 ```
 
-Expected: 26 passed (8 fixtures + 5 demos + 8 healing + 5 singles). If `test_healthy... plateau` fails, adjust healthy decay constant (`0.06` → steeper) — never the rule table.
+Expected: 35 passed (8 fixtures + 5 demos + 8 healing + 5 singles + 1 precedence + 8 boundaries). If `test_healthy... plateau` fails, adjust healthy decay constant (`0.06` → steeper) — never the rule table.
 
 - [ ] **Step 5: Lint + commit**
 
@@ -1314,7 +1343,7 @@ from supertaco import cli
 
 def test_run_config_success_prints_events(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)  # configs/runs + logs land in tmp
-    fixture = next(p for p in (Path(__file__).resolve().parents[1] / "configs" / "runs").glob("*NAN_LOSS*"))
+    fixture = next(p for p in (Path(__file__).resolve().parents[1] / "configs" / "runs").glob("*NAN_LOSS*") if "_patched" not in p.name)
 
     class FakeLLM:
         call_log = []
@@ -1455,7 +1484,7 @@ from streamlit.testing.v1 import AppTest
 
 REPO = Path(__file__).resolve().parents[1]
 DASHBOARD = REPO / "supertaco" / "ui" / "dashboard.py"
-NAN_FIXTURE = next((REPO / "configs" / "runs").glob("*NAN_LOSS*"))
+NAN_FIXTURE = next(p for p in (REPO / "configs" / "runs").glob("*NAN_LOSS*") if "_patched" not in p.name)
 
 
 @pytest.fixture()
