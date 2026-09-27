@@ -594,11 +594,13 @@ def test_real_call_records_mode_and_tokens(monkeypatch, tmp_path):
     assert entry["mode"] == "real"
     assert entry["tokens"] == 42
     assert entry["error"] is None
+    assert entry["jsonl_written"] is True
     lines = (tmp_path / "logs" / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines()
     assert json.loads(lines[-1])["mode"] == "real"
 
 
-def test_failed_call_falls_back_and_opens_circuit(monkeypatch):
+def test_failed_call_falls_back_and_opens_circuit(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)  # never write the repo's real llm_calls.jsonl
     client = _client()
     calls = []
 
@@ -616,6 +618,7 @@ def test_failed_call_falls_back_and_opens_circuit(monkeypatch):
     second = client.classify_failure("CUDA out of memory")
     assert second.strip() == "OOM"
     assert client.call_log[-1]["mode"] == "fallback"
+    assert client.call_log[-1]["tokens"] == 0
     assert "circuit_open" in client.call_log[-1]["error"]
     assert len(calls) == 1                       # second call skipped HTTP
 
@@ -725,11 +728,14 @@ Replace `_call` (lines 23-29) with:
             with open(log_dir / "llm_calls.jsonl", "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(entry) + "\n")
             entry["jsonl_written"] = True
-        except OSError:
+        except OSError as exc:
+            import warnings
+
             entry["jsonl_written"] = False
+            warnings.warn(f"llm_calls.jsonl write failed: {exc}", stacklevel=2)
 ```
 
-Keep `_simulate_response`, `classify_failure`, `propose_patch`, `deep_reason`, `log_call` unchanged.
+Keep `_simulate_response`, `classify_failure`, `propose_patch`, `deep_reason`, `log_call` unchanged — content-wise. Baseline lint cleanup allowed: dropping the unused `ConfigurationError` import and line-wrapping long prompt lines (prompts must stay byte-identical).
 
 - [ ] **Step 4: Run test to verify it passes**
 
