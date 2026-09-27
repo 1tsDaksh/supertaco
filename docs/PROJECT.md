@@ -24,6 +24,7 @@ and LLaMA-Factory + LoRA for the actual training.
 verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
+- 2026-09-24: eval: Nemotron judge with hash fallback + clamping; 5-prompt suite with regression flag (plan Task 6).
 - 2026-09-24: runner: invariant/failure_key/gate test pins, uniform run_failed payload (plan Task 5 review fixes).
 - 2026-09-24: runner: single event-emitting run path with healing loop, retry cap, config patching (plan Task 5).
 - 2026-09-24: llm: JSONL write failure now warns; tests isolated from real audit log (plan Task 4 review fixes).
