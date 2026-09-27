@@ -1175,7 +1175,7 @@ def test_run_eval_suite_regression_flag():
     assert len(results["base_scores"]) == 5
     assert results["regression_flagged"] is True
     assert all(0.0 <= s <= 10.0 for s in results["base_scores"] + results["fine_tuned_scores"])
-    assert all(m == "real" for m in results["modes"])
+    assert all(m == "base:real / ft:real" for m in results["modes"])
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1336,7 +1336,7 @@ def run_eval_suite(prompts, base_responses: dict, fine_tuned_responses: dict,
 
 
 def check_regression(eval_results: dict) -> bool:
-    """True when fine-tuned average is >10%% below baseline."""
+    """True when fine-tuned average is >10% below baseline."""
     return eval_results.get("regression_flagged", False)
 ```
 
