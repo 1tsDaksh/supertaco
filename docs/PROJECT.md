@@ -1,7 +1,7 @@
-# PROJECT.md — SandboxTune
+# PROJECT.md — SuperTaco
 
 ## Summary (one paragraph)
-SandboxTune is an AI-supervised fine-tuning sandbox: a user submits a dataset + goal, and an agent
+SuperTaco is an AI-supervised fine-tuning sandbox: a user submits a dataset + goal, and an agent
 writes the training config, launches the job on Nebius AI Cloud (Serverless Jobs), watches the logs
 and metrics, diagnoses failures (NaN loss, OOM, divergence, eval regression), patches the config,
 and retries — up to 3 times — until a checkpoint is produced, evaluated against a fixed prompt
@@ -24,6 +24,7 @@ and LLaMA-Factory + LoRA for the actual training.
 verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
+- 2026-09-28: Functional dashboard: shared event-emitting runner, config-derived dry-run logs, real Nemotron calls with fallback, real judge eval, CLI rewired.
 - 2026-09-28: dashboard: clear stale eval results on launch; fixture loader hardened (BOM, YAMLError, non-dict); eval-gating + banner count pins (plan Task 9 review fixes).
 - 2026-09-27: dashboard: fixture loader, Nemotron fallback banner, LLM call table, real judge eval suite, dry-run checkbox wired (plan Task 9).
 - 2026-09-27: dashboard: clear stale run_result on launch; ConfigurationError re-renders timeline; validation/crash no-traceback pins (plan Task 8 review fixes).

@@ -27,15 +27,15 @@ ultra escalation) · Tavily (error-context search) · Streamlit (dashboard) · L
 | Item | Status |
 |---|---|
 | Package install & imports | ✅ Operational (`pip install -e .`) |
-| Dashboard | ✅ Running at `http://localhost:8510` |
-| Agent loop (monitor → classify → patch → relaunch) | ✅ Working (LangGraph) |
+| Dashboard | ✅ Live event-driven panels (dry-run pipeline + real Nemotron) |
+| Agent loop (monitor → classify → patch → relaunch) | ✅ Working (event-driven runner) |
 | 8 playbook failure modes | ✅ All tested |
 | 3-retry cap (`MaxRetriesExceeded` on 4th attempt) | ✅ Enforced |
 | LLM call logging (model/tokens/latency) | ✅ Working |
 | Dry-run mode (no GPU credits consumed) | ✅ Verified |
 | Eval harness (Nemotron judge, 0–10, model comparison) | ✅ Working |
 | 8 broken-config fixtures | ✅ Generated |
-| Git working tree | ✅ Clean, pushed to `main` |
+| Git working tree | ✅ Clean (local commits pending push) |
 
 ---
 
@@ -59,7 +59,7 @@ Quality gates before committing:
 ```bash
 pytest tests/ -m "not integration"   # unit tests (mocked API, no credits)
 ruff check . && ruff format --check .
-mypy src/
+mypy supertaco/
 ```
 
 ---
@@ -84,7 +84,7 @@ supertaco/                    # Python package
 │   ├── harness.py            # Fixed prompt suite runner
 │   └── judges.py             # Nemotron-judge scoring
 ├── ui/
-│   └── dashboard.py          # Streamlit frontend (self-contained, port 8510)
+│   └── dashboard.py          # Streamlit frontend (event-driven, port 8510)
 ├── scripts/
 │   └── make_broken_configs.py # 8 broken configs generator
 ├── configs/
@@ -117,7 +117,8 @@ Nebius AI Cloud ── Serverless Job (LLaMA-Factory + LoRA) → checkpoint
 1. Max 3 relaunches; 4th attempt raises `MaxRetriesExceeded`.
 2. Every LLM call logged to `logs/llm_calls.jsonl` (model, tokens, latency, escalation reason).
 3. Every patch creates a NEW file in `configs/runs/` — configs are immutable.
-4. Dry-run mode never instantiates a real Nebius client.
+4. Dry-run mode never makes a real Nebius network call (client wrapper may be
+   constructed; `launch_job(dry_run=True)` is payload-only).
 
 ---
 
@@ -177,8 +178,8 @@ Live API keys for **Nebius** and **Tavily** were exposed in plaintext outside th
 
 **Known gaps / not yet built:**
 - No real Nebius AI Cloud job has run (dry-run + fixtures only).
-- `mypy src/` configured, but `src/` path in gates should be verified against actual layout.
-- Dashboard is self-contained and does not import the package — keep changes in sync manually.
+- Dashboard consumes `supertaco.runner` (typed-event seam) plus `supertaco.eval`
+  for the judge panel; it no longer duplicates pipeline logic.
 
 **Rules for contributors:**
 - Read `AGENTS.md`, `CONVENTIONS.md`, and `SPEC.md` before coding (if present in repo).
