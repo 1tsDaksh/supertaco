@@ -49,12 +49,17 @@ def score_response(
         http_mode = llm.call_log[-1].get("mode", "real")
         http_error = llm.call_log[-1].get("error")
 
-    numbers = re.findall(r"-?\d+(?:\.\d+)?", text)  # signed so "Score: -2" clamps to 0.0
-    if not numbers:
-        return JudgeResult(
-            _hash_score(prompt, response), "hash", f"unparseable judge output: {text[:80]!r}"
-        )
-    raw = float(numbers[-1])  # last number: avoids "0 to 10" echoes
+    # "8/10" or "8 out of 10" -> numerator; a trailing denominator must not win
+    fraction = re.search(r"(-?\d+(?:\.\d+)?)\s*(?:/|out of\s*)10\b", text)
+    if fraction:
+        raw = float(fraction.group(1))
+    else:
+        numbers = re.findall(r"-?\d+(?:\.\d+)?", text)  # signed: "Score: -2" -> 0.0
+        if not numbers:
+            return JudgeResult(
+                _hash_score(prompt, response), "hash", f"unparseable judge output: {text[:80]!r}"
+            )
+        raw = float(numbers[-1])  # last number: avoids "0 to 10" echoes
     score = max(0.0, min(10.0, raw))
     return JudgeResult(round(score, 2), http_mode, http_error)
 

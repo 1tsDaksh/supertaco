@@ -70,3 +70,26 @@ def test_run_eval_suite_regression_flag():
     assert results["regression_flagged"] is True
     assert all(0.0 <= s <= 10.0 for s in results["base_scores"] + results["fine_tuned_scores"])
     assert all(m == "base:real / ft:real" for m in results["modes"])
+
+
+def test_fraction_replies_parse_numerator():
+    llm = FakeLLM(["Score: 8/10", "7 out of 10"])
+    assert score_response("p", "r", llm=llm).score == 8.0
+    assert score_response("p", "r", llm=llm).score == 7.0
+
+
+def test_suite_caps_at_five_prompts():
+    llm = FakeLLM(["5"] * 15)  # 10 consumed for 5 prompts x 2 calls; 6th would take 12
+    extra = DEFAULT_PROMPTS + ["sixth prompt"]
+    base = {p: "b" for p in extra}
+    ft = {p: "f" for p in extra}
+    results = run_eval_suite(extra, base, ft, llm=llm)
+    assert len(results["prompts"]) == 5
+    assert len(llm.replies) == 5  # only 5 prompts scored
+
+
+def test_suite_without_llm_reports_hash_modes():
+    base, ft = build_responses({"learning_rate": 2e-5, "batch_size": 8})
+    results = run_eval_suite(DEFAULT_PROMPTS, base, ft, llm=None)
+    assert all(m == "base:hash / ft:hash" for m in results["modes"])
+    assert results["regression_flagged"] is False
