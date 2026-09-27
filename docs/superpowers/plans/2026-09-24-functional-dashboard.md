@@ -1941,6 +1941,26 @@ Expected: FAIL — no `eval_results` key / no fixture selectbox / no banner.
             st.sidebar.success(f"Loaded {chosen}")
 ```
 
+Review-fix hardening for the Load Fixture handler (spec 6: a malformed fixture must
+never be a Streamlit traceback; PowerShell-created files may carry a BOM):
+
+```python
+        if st.sidebar.button("Load Fixture"):
+            import yaml as _yaml
+            try:
+                cfg = _yaml.safe_load(
+                    (_Path(__file__).resolve().parents[2] / "configs" / "runs" / chosen)
+                    .read_text(encoding="utf-8-sig"))
+            except _yaml.YAMLError as exc:
+                st.sidebar.error(f"Could not parse {chosen}: {exc}")
+            else:
+                if not isinstance(cfg, dict):
+                    st.sidebar.error(f"{chosen} is not a config mapping")
+                else:
+                    st.session_state["config"] = cfg
+                    st.sidebar.success(f"Loaded {chosen}")
+```
+
 2. **Fallback banner** — in `render_sidebar()` at the top after the title:
 
 ```python
@@ -1961,6 +1981,7 @@ Expected: FAIL — no `eval_results` key / no fixture selectbox / no banner.
         if run_clicked:
             st.session_state["run_result"] = None  # never trust a stale result
             st.session_state["llm_calls"] = []  # stale calls must not outlive a failed run
+            st.session_state["eval_results"] = None  # stale eval must not score a newer run
             try:
                 ...
                 st.session_state["run_result"] = result
@@ -1970,7 +1991,8 @@ Expected: FAIL — no `eval_results` key / no fixture selectbox / no banner.
 (clear as the FIRST statements of the branch — next to the existing `run_result = None`
 from Task 8's fix round; store right after `run_result`. On ConfigurationError/crash both
 stay empty → banner and LLM table hide, matching `run_result is None`. `init_session2`
-already seeds `"llm_calls": []` — verified at dashboard.py:79.)
+already seeds `"llm_calls": []` — verified at dashboard.py:79. `eval_results = None` is
+the quality-review fix: run A's eval numbers must never render under run B.)
 
 4. **Replace `render_eval_panel`** entirely with a suite-based panel:
 
@@ -2071,21 +2093,73 @@ Tests never uncheck it (default `True` → identical behavior); offline runners 
 emit `run_started` with `dry_run=dry_run` (runner.py) and `_render_events` handles the
 `run_failed` event Gate 1 produces.
 
+9. **Review-fix round** (quality review returned "With fixes" — these land as a second
+   commit after `feat(dashboard): ...`):
+
+   a. **Stale eval clear** — `st.session_state["eval_results"] = None` as the third
+      clear statement in `run_clicked` (item 3 above). Empirically confirmed bug:
+      run A → eval → run B showed A's Before/After numbers under B.
+
+   b. **Fixture loader hardening** — guarded Load Fixture handler (item 1 above):
+      `utf-8-sig` read, `yaml.YAMLError` → `st.sidebar.error` (spec 6: never a
+      Streamlit traceback), `isinstance(cfg, dict)` guard.
+
+   c. **mypy fix** — in `render_eval_panel` the inner `results = run_eval_suite(...)`
+      followed by the later `results = st.session_state.get("eval_results")` is the
+      file's only NEW mypy error (`dashboard.py:253`, `Any | None` assigned to `dict`).
+      Rename the first binding to `suite_results`.
+
+   d. **Prune dead `init_session2` seeds** — delete `before_scores`, `after_scores`
+      (orphaned by the eval rewrite) and sim-era `logs`, `failure_key`, `retry_count`,
+      `job_id`, `timeline` ONLY after grepping `supertaco/` + `tests/` for readers
+      (expected: zero). Keep `config`, `events`, `run_result`, `llm_calls`,
+      `eval_results`, `max_retries`.
+
+   e. **Test edits** in `tests/test_dashboard.py`:
+      - Fix the wrong comment in `test_fixture_loader_and_eval_suite` (it says "the
+        filenames live in `s.options`" — `options` actually holds the format_func
+        LABELS; the assertion passes via substring `NAN_LOSS ⊂ NAN_LOSS_broken`).
+      - Same test, before `_launch_nan`: pin eval gating —
+        `assert not any("Eval" in b.label for b in app.button)`.
+      - `test_fallback_banner_shows_after_offline_run`, after existing asserts, pin
+        banner↔state count consistency:
+        ```python
+        calls = app.session_state["run_result"].llm_calls
+        assert any(f"{len(calls)}/{len(calls)}" in t for t in banner_texts)
+        ```
+      - New fast test pinning (a) without a second full run — the clear is the branch's
+        first statement, so the validation-error path exercises the same line:
+        ```python
+        def test_new_launch_clears_stale_eval(app):
+            app.session_state["eval_results"] = {"stale": True}
+            app.session_state["config"] = {"batch_size": 8}
+            app.run()
+            launch = next(b for b in app.button if "Launch Job" in b.label)
+            launch.click().run()
+            assert app.session_state["eval_results"] is None
+        ```
+
+   Known accepted leftovers (documented, not fixed): banner's one-interaction lag after
+   a failed rerun (plan decision — no `st.rerun()` because it would wipe `st.error`
+   messages); AppTest cannot `.select()` on the format_func'd Fixture box (double
+   format_func raises in Streamlit 1.54) → Load Fixture is covered by Task 10's live
+   browser smoke, not AppTest.
+
 - [ ] **Step 4: Run full test suite**
 
 ```powershell
 python -m pytest tests/ -m "not integration" -v
 ```
 
-Expected: all passed (playbook 4, simlogs 37, llm 3, runner 8, judge 9, cli 4, dashboard 8) = 73 tests.
+Expected: all passed (playbook 4, simlogs 37, llm 3, runner 8, judge 9, cli 4, dashboard 9) = 74 tests.
 
-- [ ] **Step 5: Lint + commit**
+- [ ] **Step 5: Lint + commit (fix round)**
 
 ```powershell
 python -m ruff check supertaco/ui/dashboard.py tests/test_dashboard.py
 python -m ruff format supertaco/ui/dashboard.py tests/test_dashboard.py
 git add supertaco/ui/dashboard.py tests/test_dashboard.py docs/PROJECT.md
-git commit -m "feat(dashboard): fixture loader, fallback banner, LLM call table, real judge eval suite"
+git commit -m "fix(dashboard): clear stale eval results, harden fixture loader, state pins"
 ```
 
 Add one line under `## Recent changes (newest first)` in `docs/PROJECT.md` first
