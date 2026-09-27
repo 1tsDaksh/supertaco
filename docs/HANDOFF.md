@@ -16,7 +16,7 @@ playbook, patches the config, and retries (max 3) until a checkpoint is produced
 against a fixed prompt suite (Nemotron judge), and deployed to a Serverless Endpoint for
 before/after comparison.
 
-**Stack:** Python 3.11 · LangGraph (agent) · Nemotron via Nebius Token Factory (nano → super →
+**Stack:** Python 3.11 · event-driven runner (`supertaco.runner`) · Nemotron via Nebius Token Factory (nano → super →
 ultra escalation) · Tavily (error-context search) · Streamlit (dashboard) · LLaMA-Factory + LoRA
 (training, on Nebius AI Cloud).
 
@@ -30,7 +30,7 @@ ultra escalation) · Tavily (error-context search) · Streamlit (dashboard) · L
 | Dashboard | ✅ Live event-driven panels (dry-run pipeline + real Nemotron) |
 | Agent loop (monitor → classify → patch → relaunch) | ✅ Working (event-driven runner) |
 | 8 playbook failure modes | ✅ All tested |
-| 3-retry cap (`MaxRetriesExceeded` on 4th attempt) | ✅ Enforced |
+| 3-retry cap (4th attempt → `run_failed`, error `MaxRetriesExceeded`) | ✅ Enforced |
 | LLM call logging (model/tokens/latency) | ✅ Working |
 | Dry-run mode (no GPU credits consumed) | ✅ Verified |
 | Eval harness (Nemotron judge, 0–10, model comparison) | ✅ Working |
@@ -78,7 +78,7 @@ supertaco/                    # Python package
 ├── agent/
 │   ├── playbook.py           # 8 failure modes: detection signals + typed fixes
 │   ├── llm.py                # Nemotron client (nano→super→ultra escalation)
-│   ├── graph.py              # LangGraph state machine
+│   ├── graph.py              # supervisor nodes (legacy; runner drives the loop)
 │   └── tools.py              # @tool functions (patch_config, launch_job, tavily_lookup)
 ├── eval/
 │   ├── harness.py            # Fixed prompt suite runner
@@ -105,16 +105,17 @@ supertaco/                    # Python package
 Dashboard (Streamlit :8510)
   │ submit config / watch logs / agent timeline / before-after eval
   ▼
-Agent Supervisor (LangGraph)
+Agent loop (supertaco.runner, event-driven)
   monitor → classify (nemotron nano) → patch (super) → deep reason (ultra, low-conf only)
-  │ known failure → playbook fix · unknown failure → Tavily doc lookup
+  │   known failure → playbook fix · every LLM call logged (mode + fallback)
   ▼
 Nebius AI Cloud ── Serverless Job (LLaMA-Factory + LoRA) → checkpoint
               └── Serverless Endpoint (serve fine-tuned model) → eval harness → judge
 ```
 
 **Design invariants (do not break):**
-1. Max 3 relaunches; 4th attempt raises `MaxRetriesExceeded`.
+1. Max 3 relaunches; a 4th attempt is not made — exhaustion emits `run_failed`
+   (error `MaxRetriesExceeded`) and returns `success=False` instead of raising.
 2. Every LLM call logged to `logs/llm_calls.jsonl` (model, tokens, latency, escalation reason).
 3. Every patch creates a NEW file in `configs/runs/` — configs are immutable.
 4. Dry-run mode never makes a real Nebius network call (client wrapper may be
