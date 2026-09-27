@@ -1176,6 +1176,29 @@ def test_run_eval_suite_regression_flag():
     assert results["regression_flagged"] is True
     assert all(0.0 <= s <= 10.0 for s in results["base_scores"] + results["fine_tuned_scores"])
     assert all(m == "base:real / ft:real" for m in results["modes"])
+
+
+def test_fraction_replies_parse_numerator():
+    llm = FakeLLM(["Score: 8/10", "7 out of 10"])
+    assert score_response("p", "r", llm=llm).score == 8.0
+    assert score_response("p", "r", llm=llm).score == 7.0
+
+
+def test_suite_caps_at_five_prompts():
+    llm = FakeLLM(["5"] * 10)
+    extra = DEFAULT_PROMPTS + ["sixth prompt"]
+    base = {p: "b" for p in extra}
+    ft = {p: "f" for p in extra}
+    results = run_eval_suite(extra, base, ft, llm=llm)
+    assert len(results["prompts"]) == 5
+    assert len(llm.replies) == 5  # only 5 prompts scored
+
+
+def test_suite_without_llm_reports_hash_modes():
+    base, ft = build_responses({"learning_rate": 2e-5, "batch_size": 8})
+    results = run_eval_suite(DEFAULT_PROMPTS, base, ft, llm=None)
+    assert all(m == "base:hash / ft:hash" for m in results["modes"])
+    assert results["regression_flagged"] is False
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1235,11 +1258,16 @@ def score_response(prompt: str, response: str, llm=None,
         http_mode = llm.call_log[-1].get("mode", "real")
         http_error = llm.call_log[-1].get("error")
 
-    numbers = re.findall(r"-?\d+(?:\.\d+)?", text)  # signed so "Score: -2" clamps to 0.0
-    if not numbers:
-        return JudgeResult(_hash_score(prompt, response), "hash",
-                           f"unparseable judge output: {text[:80]!r}")
-    raw = float(numbers[-1])  # last number: avoids "0 to 10" echoes
+    # "8/10" or "8 out of 10" -> numerator; a trailing denominator must not win
+    fraction = re.search(r"(-?\d+(?:\.\d+)?)\s*(?:/|out of\s*)10\b", text)
+    if fraction:
+        raw = float(fraction.group(1))
+    else:
+        numbers = re.findall(r"-?\d+(?:\.\d+)?", text)  # signed: "Score: -2" -> 0.0
+        if not numbers:
+            return JudgeResult(_hash_score(prompt, response), "hash",
+                               f"unparseable judge output: {text[:80]!r}")
+        raw = float(numbers[-1])  # last number: avoids "0 to 10" echoes
     score = max(0.0, min(10.0, raw))
     return JudgeResult(round(score, 2), http_mode, http_error)
 
@@ -1346,7 +1374,7 @@ def check_regression(eval_results: dict) -> bool:
 python -m pytest tests/test_judge.py -v
 ```
 
-Expected: 6 passed.
+Expected: 9 passed.
 
 - [ ] **Step 6: Lint + commit**
 
@@ -1893,7 +1921,6 @@ def render_eval_panel() -> None:
             results = run_eval_suite(DEFAULT_PROMPTS, base_responses, ft_responses,
                                      llm=eval_llm)
             st.session_state["eval_results"] = results
-            st.session_state["eval_llm_calls"] = eval_llm.call_log
 
     results = st.session_state.get("eval_results")
     if not results:
@@ -1907,6 +1934,9 @@ def render_eval_panel() -> None:
     col3.metric("Improvement", f"{ft_avg - base_avg:+.2f}")
     if results["regression_flagged"]:
         st.error("🚨 EVAL REGRESSION: fine-tuned is >10% below baseline.")
+    if any("hash" in m for m in results["modes"]):
+        st.warning("⚠ Judge fell back to hash mode (LLM unavailable) — "
+                   "scores are deterministic placeholders.")
     st.dataframe(
         {"prompt": results["prompts"],
          "base": results["base_scores"],
@@ -1950,7 +1980,7 @@ becomes:
 python -m pytest tests/ -m "not integration" -v
 ```
 
-Expected: all passed (playbook 4, simlogs 26, llm 3, runner 6, judge 6, cli 1, dashboard 6) = 52 tests.
+Expected: all passed (playbook 4, simlogs 37, llm 3, runner 8, judge 9, cli 6, dashboard 6) = 73 tests.
 
 - [ ] **Step 5: Lint + commit**
 
