@@ -110,9 +110,13 @@ def test_crash_never_shows_traceback(app, monkeypatch):
 
 def test_fixture_loader_and_eval_suite(app):
     # Fixture loader present: selectbox labeled "Fixture" offers the yaml fixtures.
-    # (s.label is the widget label; the filenames live in s.options.)
+    # (s.label is the widget label; s.options holds the format_func LABELS, e.g.
+    #  "NAN_LOSS_broken" — the assertion matches "NAN_LOSS" as a substring of it.)
     fixture_sb = next(s for s in app.selectbox if s.label == "Fixture")
     assert any("NAN_LOSS" in opt for opt in fixture_sb.options)
+
+    # eval panel must be gated on a completed run — no Eval button yet
+    assert not any("Eval" in b.label for b in app.button)
 
     # complete a run first
     app = _launch_nan(app)
@@ -134,3 +138,15 @@ def test_fallback_banner_shows_after_offline_run(app):
     # sidebar should surface the fallback state (error element)
     banner_texts = [e.value for e in app.sidebar.error]
     assert any("fallback" in t.lower() for t in banner_texts)
+    # banner count must match the state the LLM table renders
+    calls = app.session_state["run_result"].llm_calls
+    assert any(f"{len(calls)}/{len(calls)}" in t for t in banner_texts)
+
+
+def test_new_launch_clears_stale_eval(app):
+    app.session_state["eval_results"] = {"stale": True}
+    app.session_state["config"] = {"batch_size": 8}
+    app.run()
+    launch = next(b for b in app.button if "Launch Job" in b.label)
+    launch.click().run()
+    assert app.session_state["eval_results"] is None

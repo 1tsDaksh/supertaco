@@ -72,15 +72,8 @@ def init_session2():
     """Initialise session-state variables if not already set."""
     defaults = {
         "config": {},
-        "logs": "",
-        "failure_key": None,
-        "retry_count": 0,
-        "job_id": None,
         "llm_calls": [],
         "eval_results": None,
-        "before_scores": [],
-        "after_scores": [],
-        "timeline": [],  # list of dicts: {step, action, reason}
         "events": [],
         "run_result": None,
     }
@@ -197,10 +190,16 @@ def render_sidebar() -> Dict[str, any]:
         if st.sidebar.button("Load Fixture"):
             import yaml as _yaml
 
-            st.session_state["config"] = _yaml.safe_load(
-                (runs_dir / chosen).read_text(encoding="utf-8")
-            )
-            st.sidebar.success(f"Loaded {chosen}")
+            try:
+                cfg = _yaml.safe_load((runs_dir / chosen).read_text(encoding="utf-8-sig"))
+            except _yaml.YAMLError as exc:
+                st.sidebar.error(f"Could not parse {chosen}: {exc}")
+            else:
+                if not isinstance(cfg, dict):
+                    st.sidebar.error(f"{chosen} is not a config mapping")
+                else:
+                    st.session_state["config"] = cfg
+                    st.sidebar.success(f"Loaded {chosen}")
 
     st.sidebar.markdown("---")
     if st.sidebar.button("🔄 Reset Session", use_container_width=True):
@@ -247,8 +246,10 @@ def render_eval_panel() -> None:
         with st.spinner("Scoring with Nemotron judge..."):
             base_responses, ft_responses = build_responses(result.final_config)
             eval_llm = _make_llm()  # fresh client -> fresh circuit breaker
-            results = run_eval_suite(DEFAULT_PROMPTS, base_responses, ft_responses, llm=eval_llm)
-            st.session_state["eval_results"] = results
+            suite_results = run_eval_suite(
+                DEFAULT_PROMPTS, base_responses, ft_responses, llm=eval_llm
+            )
+            st.session_state["eval_results"] = suite_results
 
     results = st.session_state.get("eval_results")
     if not results:
@@ -436,6 +437,7 @@ def main():
         if run_clicked:
             st.session_state["run_result"] = None  # never trust a stale result
             st.session_state["llm_calls"] = []  # stale calls must not outlive a failed run
+            st.session_state["eval_results"] = None  # stale eval must not score a newer run
             try:
                 events, result = execute_launch(
                     cfg_for_run,
