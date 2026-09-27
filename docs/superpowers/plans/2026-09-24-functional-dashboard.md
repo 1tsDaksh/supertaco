@@ -859,6 +859,7 @@ def test_retry_cap_emits_run_failed(tmp_path):
     assert "MaxRetriesExceeded" in result.error
     assert events[-1].type == "run_failed"
     assert len(result.configs_written) == 3  # one patch per relaunch decision
+    assert sum(1 for e in events if e.type == "patch_written") == 3
 
 
 def test_divergence_flag_when_nemotron_disagrees(tmp_path):
@@ -1029,18 +1030,17 @@ def run(
               nemotron_verdict=verdict, mode=last.get("mode", "unknown"),
               diverged=verdict != failure_key)
 
-        proposal = llm.propose_patch(failure_key, current, logs)
-        _emit(on_event, "patch_proposed", attempt=attempt, failure_key=failure_key,
-              proposal=proposal)
-
-        new_config = apply_default_fix(failure_key, current)
-        path = _write_config(new_config, failure_key, Path(runs_dir))
-        configs_written.append(path)
-        _emit(on_event, "patch_written", attempt=attempt, path=path,
-              failure_key=failure_key, before=current, after=new_config)
-        current = new_config
-
         if attempt < attempt_limit:
+            proposal = llm.propose_patch(failure_key, current, logs)
+            _emit(on_event, "patch_proposed", attempt=attempt, failure_key=failure_key,
+                  proposal=proposal)
+
+            new_config = apply_default_fix(failure_key, current)
+            path = _write_config(new_config, failure_key, Path(runs_dir))
+            configs_written.append(path)
+            _emit(on_event, "patch_written", attempt=attempt, path=path,
+                  failure_key=failure_key, before=current, after=new_config)
+            current = new_config
             _emit(on_event, "retry_scheduled", next_attempt=attempt + 1)
 
     error = f"MaxRetriesExceeded: {max_retries} relaunches exhausted"
