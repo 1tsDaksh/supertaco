@@ -1955,13 +1955,22 @@ Expected: FAIL — no `eval_results` key / no fixture selectbox / no banner.
         st.sidebar.success(f"✅ Nemotron: {len(calls)} real call(s)")
 ```
 
-3. Store calls after launch — in the `run_clicked` handler after computing `result`:
+3. Store/clear calls in the `run_clicked` handler:
 
 ```python
+        if run_clicked:
+            st.session_state["run_result"] = None  # never trust a stale result
+            st.session_state["llm_calls"] = []  # stale calls must not outlive a failed run
+            try:
+                ...
+                st.session_state["run_result"] = result
                 st.session_state["llm_calls"] = result.llm_calls
 ```
 
-(Also add `"llm_calls"` to `init_session2` defaults if not present — it already exists.)
+(clear as the FIRST statements of the branch — next to the existing `run_result = None`
+from Task 8's fix round; store right after `run_result`. On ConfigurationError/crash both
+stay empty → banner and LLM table hide, matching `run_result is None`. `init_session2`
+already seeds `"llm_calls": []` — verified at dashboard.py:79.)
 
 4. **Replace `render_eval_panel`** entirely with a suite-based panel:
 
@@ -2026,7 +2035,10 @@ becomes:
     render_eval_panel()
 ```
 
-6. **LLM-calls table** — in the status container after `chart_slot`, add:
+6. **LLM-calls table** — in the status container, AFTER the whole `if run_clicked /
+   elif / else` block (i.e. after the `timeline_slot.info(...)` else-branch, still
+   inside the `with st.container(border=True):` body — NOT between `chart_slot` and
+   `if run_clicked:`, which would render the previous run's calls during a new launch):
 
 ```python
         calls = st.session_state.get("llm_calls") or []
@@ -2036,6 +2048,28 @@ becomes:
 ```
 
 7. Remove the old single-prompt hash scoring (`import hashlib` / `_score` inside the old panel) — gone with `render_eval_panel` rewrite. Then remove `List` and `Optional` from the `typing` import at the top of the file if `ruff check` flags them as unused (`Dict` stays — `render_sidebar` returns it).
+
+8. **Wire the dry-run checkbox** (spec 5.5 — relabeled in Task 8 but its value was
+   discarded; unchecking must actually attempt the real launch and hit Gate 1):
+
+```python
+# launcher container, replace the bare st.checkbox call:
+            dry_run_on = st.checkbox("Dry-run (Nebius GPU jobs stay dry-run until Gate 1)", value=True)
+
+# execute_launch signature gains a parameter, passed through:
+def execute_launch(config: dict, max_retries: int, timeline_slot, logs_slot, chart_slot,
+                    dry_run: bool = True):
+    ...
+    result = runner_run(config, max_retries=max_retries, on_event=on_event,
+                        llm=_make_llm(), dry_run=dry_run)
+
+# handler call site gains:
+                    dry_run=dry_run_on,
+```
+
+Tests never uncheck it (default `True` → identical behavior); offline runners already
+emit `run_started` with `dry_run=dry_run` (runner.py) and `_render_events` handles the
+`run_failed` event Gate 1 produces.
 
 - [ ] **Step 4: Run full test suite**
 
@@ -2050,9 +2084,12 @@ Expected: all passed (playbook 4, simlogs 37, llm 3, runner 8, judge 9, cli 4, d
 ```powershell
 python -m ruff check supertaco/ui/dashboard.py tests/test_dashboard.py
 python -m ruff format supertaco/ui/dashboard.py tests/test_dashboard.py
-git add supertaco/ui/dashboard.py tests/test_dashboard.py
+git add supertaco/ui/dashboard.py tests/test_dashboard.py docs/PROJECT.md
 git commit -m "feat(dashboard): fixture loader, fallback banner, LLM call table, real judge eval suite"
 ```
+
+Add one line under `## Recent changes (newest first)` in `docs/PROJECT.md` first
+(house style — every task commit includes it).
 
 ---
 
@@ -2134,4 +2171,12 @@ git log --oneline -10
 - **Spec coverage:** §2 decisions → Tasks 1 (A+B install), 3 (D2), 4+9 (D3), 6+9 (D4), 7 (D5), 5/8 (D6). §5.1 rule table → Task 3 verbatim (fixture-by-fixture classification + healing re-verified against all 8 YAMLs this review). §5.2–5.7 → Tasks 4,5,6,7. §6 error table → validation (T5), circuit breaker (T4), run_failed-not-crash (T5), broad `except Exception` + event preservation (T8), eval gating (T9). §7 test pyramid → Tasks 2–9 (52 tests). §8 docs → Task 10. §9 success criteria → Task 8 asserts + Task 10 smoke. §5.5 checkbox relabel → T8 step 5; before/after diff in timeline → T8 `_render_events`.
 - **Type consistency:** `Event(type, data)`, `RunResult(success, attempts, final_config, configs_written, failure_key, error, llm_calls)`, `score_response(...) -> JudgeResult(score, mode, error)`, `generate_logs(config) -> str`, `classify_config_failure(config) -> str|None`, `extract_loss_points(str) -> list[float]` — names identical across tasks.
 - **Review-round fixes applied:** plateau trap in Task 2's negative test; simlogs expected count 21→26; judge regex now signed so `-2` clamps to 0.0; CLI test dead imports removed; retry_scheduled timeline rendering used a key the runner never emits; dashboard package imports sorted with `supertaco.settings` deferred into `_make_llm()` (E402 + env-precedence after `_load_env()`); `except Exception` fallback + per-event session stash; `_launch_nan` extra rerun so the sidebar banner test sees post-run state; fixture-loader assertion reads `selectbox.options` not `.label`; fixtures themselves were gitignored — Task 1 now un-ignores and commits them.
+- **Task 8/9 review decisions:**
+  - No `st.rerun()` after the launch handler: it would wipe the `st.error` messages
+    rendered in the same pass (the script unwinds before a re-render), breaking the
+    crash/validation pins and hiding 🛑 failures. The sidebar banner's one-interaction
+    lag is accepted instead; `_launch_nan`'s extra `app.run()` compensates in tests.
+  - Spec §4's `llm_call` event type is NOT emitted by the runner (accepted drift):
+    on a crash the in-flight `call_log` is lost with the frame — documented here and
+    reconciled in Task 10's docs pass rather than changing the runner contract.
 - **Known plan-level risks:** Python 3.14 wheel availability for `pip install -e .` (fallback documented Task 1 Step 1); streamlit `st.empty()` streaming inside the post-button block relies on delta-per-call rendering (AppTest Task 8 asserts final state; visual streaming verified in Task 10 smoke by watching the browser); a handful of plan code lines may exceed the 100-char ruff limit — wrap them when `ruff check` flags E501.
