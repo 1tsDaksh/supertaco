@@ -1980,7 +1980,7 @@ becomes:
 python -m pytest tests/ -m "not integration" -v
 ```
 
-Expected: all passed (playbook 4, simlogs 37, llm 3, runner 8, judge 9, cli 6, dashboard 6) = 73 tests.
+Expected: all passed (playbook 4, simlogs 37, llm 3, runner 8, judge 9, cli 1, dashboard 6) = 68 tests.
 
 - [ ] **Step 5: Lint + commit**
 
