@@ -121,8 +121,11 @@ class NemotronClient:
             with open(log_dir / "llm_calls.jsonl", "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(entry) + "\n")
             entry["jsonl_written"] = True
-        except OSError:
+        except OSError as exc:
+            import warnings
+
             entry["jsonl_written"] = False
+            warnings.warn(f"llm_calls.jsonl write failed: {exc}", stacklevel=2)
 
     def _simulate_response(self, model_id: str, prompt: str) -> str:
         """Simulate Nemotron response based on model and prompt."""

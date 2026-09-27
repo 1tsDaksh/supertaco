@@ -24,6 +24,7 @@ and LLaMA-Factory + LoRA for the actual training.
 verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
+- 2026-09-24: llm: JSONL write failure now warns; tests isolated from real audit log (plan Task 4 review fixes).
 - 2026-09-24: llm: real Token Factory calls, circuit-breaker fallback, JSONL audit (plan Task 4).
 - 2026-09-24: simlogs: healthy header carries config; fixture glob skips _patched; precedence + boundary tests pin rule table (plan Task 3 review fixes).
 - 2026-09-24: simlogs: deterministic config-derived dry-run log generator with healing property (plan Task 3).

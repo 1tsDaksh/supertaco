@@ -23,11 +23,13 @@ def test_real_call_records_mode_and_tokens(monkeypatch, tmp_path):
     assert entry["mode"] == "real"
     assert entry["tokens"] == 42
     assert entry["error"] is None
+    assert entry["jsonl_written"] is True
     lines = (tmp_path / "logs" / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines()
     assert json.loads(lines[-1])["mode"] == "real"
 
 
-def test_failed_call_falls_back_and_opens_circuit(monkeypatch):
+def test_failed_call_falls_back_and_opens_circuit(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     client = _client()
     calls = []
 
@@ -45,6 +47,7 @@ def test_failed_call_falls_back_and_opens_circuit(monkeypatch):
     second = client.classify_failure("CUDA out of memory")
     assert second.strip() == "OOM"
     assert client.call_log[-1]["mode"] == "fallback"
+    assert client.call_log[-1]["tokens"] == 0
     assert "circuit_open" in client.call_log[-1]["error"]
     assert len(calls) == 1  # second call skipped HTTP
 
