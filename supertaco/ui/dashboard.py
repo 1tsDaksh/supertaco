@@ -398,6 +398,7 @@ def main():
         chart_slot = st.empty()
 
         if run_clicked:
+            st.session_state["run_result"] = None  # never trust a stale result
             try:
                 events, result = execute_launch(
                     cfg_for_run,
@@ -414,6 +415,7 @@ def main():
                     st.toast("✅ Run healed", icon="✅")
             except ConfigurationError as exc:
                 st.error(f"❌ {exc}")
+                timeline_slot.markdown(_render_events(st.session_state.get("events", [])))
             except Exception as exc:  # spec 6: never a Streamlit traceback
                 st.error(f"❌ Run crashed: {exc}")
                 timeline_slot.markdown(_render_events(st.session_state.get("events", [])))

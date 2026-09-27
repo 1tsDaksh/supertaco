@@ -56,6 +56,7 @@ def test_launch_heals_nan_fixture(app):
     assert len(result.configs_written) == 1
 
     types = [e.type for e in app.session_state["events"]]
+    assert types[0] == "run_started"
     assert "failure_detected" in types
     assert "patch_written" in types
     assert types[-1] == "run_succeeded"
@@ -81,3 +82,27 @@ def test_loss_chart_receives_real_points(app):
     loss_events = [e for e in app.session_state["events"] if e.type == "logs_produced"]
     assert len(loss_events) == 2
     assert len(loss_events[0].data["loss_points"]) >= 10
+
+
+def test_validation_error_shows_no_traceback(app):
+    app.session_state["config"] = {"batch_size": 8}  # missing learning_rate
+    app.run()
+    launch = next(b for b in app.button if "Launch Job" in b.label)
+    launch.click().run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert any("learning_rate" in e.value for e in app.error)
+    assert app.session_state["run_result"] is None
+
+
+def test_crash_never_shows_traceback(app, monkeypatch):
+    import supertaco.runner as runner_mod
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("synthetic mid-run boom")
+
+    monkeypatch.setattr(runner_mod, "run", boom)
+    launch = next(b for b in app.button if "Launch Job" in b.label)
+    launch.click().run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert any("Run crashed" in e.value for e in app.error)
+    assert app.session_state["run_result"] is None
