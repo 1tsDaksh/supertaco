@@ -24,6 +24,7 @@ and LLaMA-Factory + LoRA for the actual training.
 verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
+- 2026-09-24: cli: run subcommand rewired to shared runner; F821 crashes resolved (plan Task 7).
 - 2026-09-24: eval: numerator-first parse for X/10 judge replies; suite slice + hash-mode pins (plan Task 6 review fixes).
 - 2026-09-24: eval: Nemotron judge with hash fallback + clamping; 5-prompt suite with regression flag (plan Task 6).
 - 2026-09-24: runner: invariant/failure_key/gate test pins, uniform run_failed payload (plan Task 5 review fixes).
