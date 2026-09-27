@@ -78,7 +78,7 @@ HEALTHY = {
 def _fixture(mode: str) -> dict:
     import yaml
 
-    matches = [p for p in RUNS.glob("*.yaml") if mode in p.name]
+    matches = [p for p in RUNS.glob("*.yaml") if mode in p.name and "_patched" not in p.name]
     assert matches, f"no fixture for {mode}"
     return yaml.safe_load(matches[0].read_text(encoding="utf-8"))
 
@@ -131,3 +131,53 @@ def test_divergence_series_increases():
 def test_nan_series_contains_nan():
     pts = extract_loss_points(generate_logs(_fixture("NAN_LOSS")))
     assert any(math.isnan(v) for v in pts)
+
+
+def test_precedence_multi_trigger_configs_surface_first_rule():
+    # The rule order is load-bearing for multi-trigger healing chains: the
+    # FIRST matching rule must win regardless of what else the config trips.
+    assert classify_config_failure({"batch_size": 64, "learning_rate": 0.1}) == "OOM"
+    assert classify_config_failure({"batch_size": 64, "num_workers": 20}) == "OOM"
+    assert (
+        classify_config_failure({"learning_rate": 0.1, "lora_r": 64, "num_epochs": 10})
+        == "LOSS_DIVERGENCE"
+    )
+    assert (
+        classify_config_failure(
+            {
+                "learning_rate": 1e-4,
+                "lora_r": 64,
+                "num_epochs": 10,
+                "chat_template": "llama-3",
+                "gradient_clip_norm": 1.0,
+            }
+        )
+        == "EVAL_REGRESSION"
+    )
+
+
+@pytest.mark.parametrize(
+    "config,mode",
+    [
+        ({"batch_size": 32, "learning_rate": 2e-5}, None),
+        ({"batch_size": 33, "learning_rate": 2e-5}, "OOM"),
+        ({"learning_rate": 0.04999}, None),
+        ({"learning_rate": 0.05, "chat_template": None}, "NAN_LOSS"),
+        ({"learning_rate": 1.5e-6}, None),
+        ({"learning_rate": 1.4e-6}, "LOSS_PLATEAU"),
+        ({"learning_rate": 2e-5, "lora_r": 31, "num_epochs": 10}, None),
+        ({"learning_rate": 2e-5, "lora_r": 32, "num_epochs": 10}, "EVAL_REGRESSION"),
+        ({"learning_rate": 0.05, "num_epochs": 8, "chat_template": "llama-3"}, "LOSS_DIVERGENCE"),
+        (
+            {
+                "learning_rate": 0.05,
+                "num_epochs": 8,
+                "chat_template": "llama-3",
+                "gradient_clip_norm": 1.0,
+            },
+            None,
+        ),
+    ],
+)
+def test_rule_table_boundaries(config, mode):
+    assert classify_config_failure(config) == mode

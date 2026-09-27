@@ -17,8 +17,9 @@ LOSS_RE = re.compile(r"\bloss\s+([0-9]+\.[0-9]+|NaN)\b")
 def classify_config_failure(config: dict) -> Optional[str]:
     """Return the failure mode a config would trigger, or None if healthy.
 
-    Missing keys are read as None/0. Precedence order is significant: it is
-    the order modes surface across relaunches for multi-trigger configs.
+    Missing keys are read as None/0 (num_epochs defaults to 3). Precedence
+    order is significant: it is the order modes surface across relaunches
+    for multi-trigger configs.
     """
     lr = float(config.get("learning_rate") or 0)
     batch = int(config.get("batch_size") or 0)
@@ -56,11 +57,11 @@ def _header(config: dict) -> str:
     )
 
 
-def _healthy_logs() -> str:
+def _healthy_logs(config: dict) -> str:
     # Decay chosen so playbook's plateau window (last 10, must differ by >= 0.5)
     # and divergence check (second half not > 1.1x first) both stay negative.
     lines = [f"step {i} loss {2.4 - i * 0.06:.3f}" for i in range(30)]
-    return _header({}) + "\n".join(lines) + "\ntraining finished (dry-run)\n"
+    return _header(config) + "\n".join(lines) + "\ntraining finished (dry-run)\n"
 
 
 def _nan_logs(config: dict) -> str:
@@ -160,7 +161,7 @@ def generate_logs(config: dict) -> str:
     """Return the training log a run with this config would produce."""
     mode = classify_config_failure(config)
     if mode is None:
-        return _healthy_logs()
+        return _healthy_logs(config)
     return _EMITTERS[mode](config)
 
 

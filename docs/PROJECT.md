@@ -24,6 +24,7 @@ and LLaMA-Factory + LoRA for the actual training.
 verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
+- 2026-09-24: simlogs: healthy header carries config; fixture glob skips _patched; precedence + boundary tests pin rule table (plan Task 3 review fixes).
 - 2026-09-24: simlogs: deterministic config-derived dry-run log generator with healing property (plan Task 3).
 - 2026-09-24: Playbook eval-regression detector tightened to per-line match; tests hardened (plan Task 2 review).
 - 2026-09-24: Playbook: EVAL_REGRESSION detects log text; ConfigurationError import fixed (plan Task 2).
