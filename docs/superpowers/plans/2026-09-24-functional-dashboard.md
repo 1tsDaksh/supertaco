@@ -815,6 +815,7 @@ def test_validation_rejects_empty_config(tmp_path):
 def test_success_path_healthy_config(tmp_path):
     events, on_event = _collect()
     result = run(HEALTHY, on_event=on_event, llm=FakeLLM(), runs_dir=tmp_path)
+    assert isinstance(result, RunResult)
     assert result.success is True
     assert result.attempts == 1
     assert result.error is None
@@ -859,6 +860,9 @@ def test_retry_cap_emits_run_failed(tmp_path):
     assert "MaxRetriesExceeded" in result.error
     assert events[-1].type == "run_failed"
     assert len(result.configs_written) == 3  # one patch per relaunch decision
+    assert len(set(result.configs_written)) == 3  # never overwrite (invariant 3)
+    assert all(Path(p).exists() for p in result.configs_written)
+    assert result.failure_key == "NAN_LOSS"
     assert sum(1 for e in events if e.type == "patch_written") == 3
 
 
@@ -877,6 +881,28 @@ def test_real_jobs_not_implemented_returns_failed_result(tmp_path):
     assert result.success is False
     assert "Gate 1" in result.error
     assert events[-1].type == "run_failed"
+
+
+def test_no_callback_still_runs(tmp_path):
+    result = run(HEALTHY, llm=FakeLLM(), runs_dir=tmp_path)
+    assert result.success is True
+    assert result.attempts == 1
+
+
+def test_max_retries_zero_gate(tmp_path):
+    events, on_event = _collect()
+
+    def always_nan(config: dict) -> str:
+        return "step 0 loss NaN"
+
+    result = run(BROKEN_NAN, on_event=on_event, llm=FakeLLM(), log_fn=always_nan,
+                 max_retries=0, runs_dir=tmp_path)
+    assert result.success is False
+    assert result.attempts == 1
+    assert result.configs_written == []
+    types = [e.type for e in events]
+    assert "patch_written" not in types
+    assert types[-1] == "run_failed"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -980,7 +1006,8 @@ def run(
 
     max_retries counts RELAUNCHES: initial attempt + up to max_retries
     relaunches; if the final attempt's logs still fail -> run_failed
-    (handoff invariant 1). Never raises for expected failures.
+    (handoff invariant 1). Validation raises ConfigurationError before any
+    event; every other failure returns success=False instead of raising.
     """
     validate_config(config)
     log_fn = log_fn or generate_logs
@@ -989,7 +1016,8 @@ def run(
 
     if not dry_run:
         error = "Real Nebius jobs are not implemented yet (Gate 1)"
-        _emit(on_event, "run_failed", error=error, attempts=0, failure_key=None)
+        _emit(on_event, "run_failed", error=error, attempts=0, failure_key=None,
+              path=None)
         return RunResult(False, 0, dict(config), [], None, error, [])
 
     from supertaco.settings import settings
@@ -1057,7 +1085,7 @@ def run(
 python -m pytest tests/test_runner.py -v
 ```
 
-Expected: 6 passed.
+Expected: 8 passed.
 
 - [ ] **Step 5: Lint + commit**
 
@@ -1811,7 +1839,7 @@ Expected: FAIL — no `eval_results` key / no fixture selectbox / no banner.
 ```python
     st.sidebar.markdown("### Broken Fixtures")
     from pathlib import Path as _Path
-    fixtures = sorted((_Path(__file__).resolve().parents[2] / "configs" / "runs").glob("*.yaml"))
+    fixtures = sorted(p for p in (_Path(__file__).resolve().parents[2] / "configs" / "runs").glob("*.yaml") if "_patched" not in p.name)
     if fixtures:
         chosen = st.sidebar.selectbox("Fixture", [f.name for f in fixtures],
                                       format_func=lambda n: n.split("_", 2)[-1].rsplit("_", 1)[0])
