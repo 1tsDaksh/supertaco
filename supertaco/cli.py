@@ -11,7 +11,10 @@ import argparse
 import json
 import sys
 
+import yaml
+
 from supertaco.agent.llm import NemotronClient
+from supertaco.errors import ConfigurationError
 from supertaco.runner import run as runner_run
 from supertaco.settings import settings
 
@@ -43,14 +46,20 @@ def _make_llm() -> NemotronClient:
 
 def run_config(config_path: str, dry_run: bool = True) -> None:
     """Run a fine-tuning job from a config file via the shared runner."""
-    config = _load_config(config_path)
+    try:
+        config = _load_config(config_path)
+    except (OSError, yaml.YAMLError) as exc:
+        raise SystemExit(f"Error loading {config_path}: {exc}") from exc
     print(f"SuperTaco: running {config_path}")
     llm = _make_llm()
 
     def printer(event) -> None:
         print(f"[{event.type}] {json.dumps(event.data, default=str)}")
 
-    result = runner_run(config, max_retries=3, dry_run=dry_run, on_event=printer, llm=llm)
+    try:
+        result = runner_run(config, max_retries=3, dry_run=dry_run, on_event=printer, llm=llm)
+    except ConfigurationError as exc:
+        raise SystemExit(str(exc)) from exc
     if result.success:
         print(f"Success after {result.attempts} attempt(s). Configs: {result.configs_written}")
     else:
@@ -59,8 +68,6 @@ def run_config(config_path: str, dry_run: bool = True) -> None:
 
 
 def _load_config(config_path: str) -> dict:
-    import yaml
-
     with open(config_path, "r", encoding="utf-8") as fh:
         config = yaml.safe_load(fh)
     return config or {}
