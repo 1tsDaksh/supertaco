@@ -106,3 +106,31 @@ def test_crash_never_shows_traceback(app, monkeypatch):
     assert not app.exception, [e.value for e in app.exception]
     assert any("Run crashed" in e.value for e in app.error)
     assert app.session_state["run_result"] is None
+
+
+def test_fixture_loader_and_eval_suite(app):
+    # Fixture loader present: selectbox labeled "Fixture" offers the yaml fixtures.
+    # (s.label is the widget label; the filenames live in s.options.)
+    fixture_sb = next(s for s in app.selectbox if s.label == "Fixture")
+    assert any("NAN_LOSS" in opt for opt in fixture_sb.options)
+
+    # complete a run first
+    app = _launch_nan(app)
+    assert app.session_state["run_result"].success is True
+
+    # real eval suite (offline -> hash/fallback modes, but structured scores)
+    eval_button = next(b for b in app.button if "Eval" in b.label)
+    eval_button.click().run()
+    assert not app.exception, [e.value for e in app.exception]
+    results = app.session_state["eval_results"]
+    assert len(results["base_scores"]) == 5
+    assert len(results["fine_tuned_scores"]) == 5
+    assert all(0.0 <= s <= 10.0 for s in results["base_scores"] + results["fine_tuned_scores"])
+    assert isinstance(results["regression_flagged"], bool)
+
+
+def test_fallback_banner_shows_after_offline_run(app):
+    app = _launch_nan(app)
+    # sidebar should surface the fallback state (error element)
+    banner_texts = [e.value for e in app.sidebar.error]
+    assert any("fallback" in t.lower() for t in banner_texts)

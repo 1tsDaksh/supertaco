@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -101,6 +101,16 @@ def render_sidebar() -> Dict[str, any]:
     """Render the sidebar with controls and settings."""
     st.sidebar.title("⚙️ Controls")
 
+    calls = st.session_state.get("llm_calls") or []
+    fallbacks = [c for c in calls if c.get("mode") != "real"]
+    if fallbacks:
+        st.sidebar.error(
+            f"⚠️ Nemotron fallback: {len(fallbacks)}/{len(calls)} call(s) used heuristics. "
+            f"First error: {fallbacks[0].get('error')}"
+        )
+    elif calls:
+        st.sidebar.success(f"✅ Nemotron: {len(calls)} real call(s)")
+
     st.sidebar.markdown("### Environment")
     env = st.sidebar.selectbox(
         "Environment",
@@ -173,6 +183,25 @@ def render_sidebar() -> Dict[str, any]:
         st.session_state["config"] = demo
         st.sidebar.success(f"Loaded {selected_demo} config")
 
+    st.sidebar.markdown("### Broken Fixtures")
+    from pathlib import Path as _Path
+
+    runs_dir = _Path(__file__).resolve().parents[2] / "configs" / "runs"
+    fixtures = sorted(p for p in runs_dir.glob("*.yaml") if "_patched" not in p.name)
+    if fixtures:
+        chosen = st.sidebar.selectbox(
+            "Fixture",
+            [f.name for f in fixtures],
+            format_func=lambda n: n.split("_", 2)[-1].rsplit("_", 1)[0],
+        )
+        if st.sidebar.button("Load Fixture"):
+            import yaml as _yaml
+
+            st.session_state["config"] = _yaml.safe_load(
+                (runs_dir / chosen).read_text(encoding="utf-8")
+            )
+            st.sidebar.success(f"Loaded {chosen}")
+
     st.sidebar.markdown("---")
     if st.sidebar.button("🔄 Reset Session", use_container_width=True):
         reset_session2()
@@ -200,62 +229,54 @@ def render_config_editor(config: dict) -> dict:
     return parsed
 
 
-def render_eval_panel(
-    before_scores: List[float],
-    after_scores: List[float],
-    prompts: Optional[List[str]] = None,
-) -> None:
-    """Render before/after evaluation comparison."""
+def render_eval_panel() -> None:
+    """Before/after eval over the fixed 5-prompt suite (real judge)."""
     st.markdown("### 📊 Before / After Evaluation")
+    result = st.session_state.get("run_result")
+    if result is None or not result.success:
+        st.info("Run a job to completion first — eval needs a final config.")
+        return
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**Before fine-tune**")
-        if before_scores:
-            st.markdown(f"• Mean score: `{sum(before_scores) / len(before_scores):.2f}`")
-            st.markdown(f"• Prompts evaluated: `{len(before_scores)}`")
-        else:
-            st.caption("No before scores yet.")
+    if st.button(
+        "🧪 Run Eval Suite (5 prompts, real Nemotron judge)",
+        use_container_width=True,
+        key="eval_suite_btn",
+    ):
+        from supertaco.eval.harness import DEFAULT_PROMPTS, build_responses, run_eval_suite
 
-    with col2:
-        st.markdown("**After fine-tune**")
-        if after_scores:
-            st.markdown(f"• Mean score: `{sum(after_scores) / len(after_scores):.2f}`")
-            st.markdown(f"• Prompts evaluated: `{len(after_scores)}`")
-        else:
-            st.caption("No after scores yet.")
+        with st.spinner("Scoring with Nemotron judge..."):
+            base_responses, ft_responses = build_responses(result.final_config)
+            eval_llm = _make_llm()  # fresh client -> fresh circuit breaker
+            results = run_eval_suite(DEFAULT_PROMPTS, base_responses, ft_responses, llm=eval_llm)
+            st.session_state["eval_results"] = results
 
-    if before_scores and after_scores:
-        improvement = (sum(after_scores) / len(after_scores)) - (
-            sum(before_scores) / len(before_scores)
+    results = st.session_state.get("eval_results")
+    if not results:
+        return
+
+    base_avg = sum(results["base_scores"]) / len(results["base_scores"])
+    ft_avg = sum(results["fine_tuned_scores"]) / len(results["fine_tuned_scores"])
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Before (base)", f"{base_avg:.2f}")
+    col2.metric("After (fine-tuned)", f"{ft_avg:.2f}")
+    col3.metric("Improvement", f"{ft_avg - base_avg:+.2f}")
+    if results["regression_flagged"]:
+        st.error("🚨 EVAL REGRESSION: fine-tuned is >10% below baseline.")
+    if any("hash" in m for m in results["modes"]):
+        st.warning(
+            "⚠ Judge fell back to hash mode (LLM unavailable) — "
+            "scores are deterministic placeholders."
         )
-        st.success(
-            f"**Improvement:** `{improvement:+.2f}` average judge score "
-            f"across `{min(len(before_scores), len(after_scores))}` shared prompts"
-        )
-
-    with st.expander("Run Judge Evaluation"):
-        prompt = st.text_area(
-            "Enter a prompt to evaluate both models:",
-            placeholder="e.g., Tell me about fine-tuning LLaMA",
-            height=100,
-        )
-        if st.button("Evaluate", use_container_width=True):
-            if prompt.strip():
-                with st.spinner("Evaluating with Nemotron judge..."):
-                    import hashlib
-
-                    def _score(prompt_text: str, model_tag: str) -> float:
-                        h = hashlib.sha256((prompt_text + model_tag).encode()).hexdigest()
-                        return int(h[:6], 16) / 0xFFFFFF * 9 + 1  # 1.0 to 10.0
-
-                    before = _score(prompt, "base")
-                    after = _score(prompt, "fine_tuned")
-                    st.session_state["before_scores"].append(before)
-                    st.session_state["after_scores"].append(after)
-                    st.rerun()
-            else:
-                st.warning("Please enter a prompt.")
+    st.dataframe(
+        {
+            "prompt": results["prompts"],
+            "base": results["base_scores"],
+            "fine_tuned": results["fine_tuned_scores"],
+            "judge": results["modes"],
+        },
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 def _make_llm() -> NemotronClient:
@@ -349,7 +370,14 @@ def _llm_rows(calls: list) -> list:
     ]
 
 
-def execute_launch(config: dict, max_retries: int, timeline_slot, logs_slot, chart_slot):
+def execute_launch(
+    config: dict,
+    max_retries: int,
+    timeline_slot,
+    logs_slot,
+    chart_slot,
+    dry_run: bool = True,
+):
     """Run the pipeline, streaming events into the status placeholders."""
     events: list[Event] = []
 
@@ -361,7 +389,13 @@ def execute_launch(config: dict, max_retries: int, timeline_slot, logs_slot, cha
             logs_slot.code(ev.data["text"], language="log")
             chart_slot.plotly_chart(_loss_figure(events), use_container_width=True)
 
-    result = runner_run(config, max_retries=max_retries, on_event=on_event, llm=_make_llm())
+    result = runner_run(
+        config,
+        max_retries=max_retries,
+        on_event=on_event,
+        llm=_make_llm(),
+        dry_run=dry_run,
+    )
     return events, result
 
 
@@ -383,7 +417,9 @@ def main():
 
         c1, c2 = st.columns(2)
         with c1:
-            st.checkbox("Dry-run (Nebius GPU jobs stay dry-run until Gate 1)", value=True)
+            dry_run_on = st.checkbox(
+                "Dry-run (Nebius GPU jobs stay dry-run until Gate 1)", value=True
+            )
         with c2:
             st.text_input("Job label", value=f"run-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}")
 
@@ -399,6 +435,7 @@ def main():
 
         if run_clicked:
             st.session_state["run_result"] = None  # never trust a stale result
+            st.session_state["llm_calls"] = []  # stale calls must not outlive a failed run
             try:
                 events, result = execute_launch(
                     cfg_for_run,
@@ -406,9 +443,11 @@ def main():
                     timeline_slot,
                     logs_slot,
                     chart_slot,
+                    dry_run=dry_run_on,
                 )
                 st.session_state["events"] = events
                 st.session_state["run_result"] = result
+                st.session_state["llm_calls"] = result.llm_calls
                 if not result.success:
                     st.error(f"🛑 {result.error}")
                 else:
@@ -436,12 +475,14 @@ def main():
         else:
             timeline_slot.info("No run yet — load a config and press Launch.")
 
+        calls = st.session_state.get("llm_calls") or []
+        if calls:
+            with st.expander(f"🧠 LLM Calls ({len(calls)})"):
+                st.dataframe(_llm_rows(calls), use_container_width=True, hide_index=True)
+
     # ── Bottom Row: Evaluation ──────────────────────────────────────
     st.markdown("---")
-    render_eval_panel(
-        st.session_state.get("before_scores", []),
-        st.session_state.get("after_scores", []),
-    )
+    render_eval_panel()
 
 
 if __name__ == "__main__":

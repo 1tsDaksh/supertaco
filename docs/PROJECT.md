@@ -24,6 +24,7 @@ and LLaMA-Factory + LoRA for the actual training.
 verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
+- 2026-09-27: dashboard: fixture loader, Nemotron fallback banner, LLM call table, real judge eval suite, dry-run checkbox wired (plan Task 9).
 - 2026-09-27: dashboard: clear stale run_result on launch; ConfigurationError re-renders timeline; validation/crash no-traceback pins (plan Task 8 review fixes).
 - 2026-09-24: dashboard: live event-driven launch with timeline, log stream, loss chart (plan Task 8).
 - 2026-09-24: cli: clean SystemExit messages for config/validation errors; failure-path pins (plan Task 7 review fixes).
