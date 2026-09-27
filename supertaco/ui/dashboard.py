@@ -16,6 +16,11 @@ import plotly.graph_objects as go
 import streamlit as st
 import yaml
 
+from supertaco.agent.llm import NemotronClient
+from supertaco.errors import ConfigurationError
+from supertaco.runner import Event
+from supertaco.runner import run as runner_run
+
 
 # ─── Load settings directly from .env (no package import needed) ────────────
 def _load_env():
@@ -58,89 +63,6 @@ def get_settings():
     return _Settings()
 
 
-# ─── Failure detection (kept in sync manually with supertaco/agent/playbook.py) ──
-def _extract_losses(lines: List[str]) -> List[float]:
-    """Pull numeric loss values out of log lines like 'Step 42 loss: 1.23'."""
-    values: List[float] = []
-    for line in lines:
-        stripped = line.strip()
-        if "loss" not in stripped.lower():
-            continue
-        tail = stripped.lower().split("loss", 1)[-1].strip().lstrip(":").strip()
-        try:
-            values.append(float(tail.split()[0]))
-        except (ValueError, IndexError):
-            continue
-    return values
-
-
-def detect_failure(log: str) -> Optional[str]:
-    """Classify training-log text into a playbook failure mode key, or None.
-
-    Mirrors supertaco/agent/playbook.py so the dashboard stays self-contained.
-    """
-    if not log:
-        return None
-    lines = log.splitlines()
-    if any("NaN" in ln and "loss" in ln.lower() for ln in lines[-20:]):
-        return "NAN_LOSS"
-    if "out of memory" in log.lower():
-        return "OOM"
-    for ln in lines[-30:]:
-        parts = ln.split()
-        if (
-            "grad_norm" in ln.lower()
-            and len(parts) >= 2
-            and parts[-1].replace(".", "").isdigit()
-            and float(parts[-1]) > 1.0
-        ):
-            return "GRADIENT_EXPLOSION"
-    losses = _extract_losses(lines[-50:])
-    if len(losses) >= 3:
-        half = len(losses) // 2
-        first_avg = sum(losses[:half]) / half
-        second_avg = sum(losses[half:]) / (len(losses) - half)
-        if second_avg > first_avg * 1.1:
-            return "LOSS_DIVERGENCE"
-        recent = losses[-10:]
-        if abs(recent[0] - recent[-1]) < 0.5:
-            return "LOSS_PLATEAU"
-    if any("eval" in ln and "regression" in ln for ln in log.lower().splitlines()):
-        return "EVAL_REGRESSION"
-    if any("tokenizer" in ln.lower() or "template" in ln.lower() for ln in lines[-30:]):
-        return "TOKENIZER_MISMATCH"
-    if "no step progress" in log.lower() and "minutes" in log.lower():
-        return "DATALOADER_STALL"
-    return None
-
-
-# ─── Session State Initialisation ────────────────────────────────
-def init_session():
-    """Initialise session-state variables if not already set."""
-    defaults = {
-        "config": {},
-        "logs": "",
-        "failure_key": None,
-        "retry_count": 0,
-        "job_id": None,
-        "llm_calls": [],
-        "eval_results": None,
-        "before_scores": [],
-        "after_scores": [],
-        "timeline": [],  # list of dicts: {step, action, reason}
-    }
-    for key, val in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = val
-
-
-def reset_session():
-    """Reset all session-state variables."""
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-    init_session()
-
-
 # ─── Main settings object (module-level, from .env) ───────────────────
 _settings = get_settings()
 
@@ -159,6 +81,8 @@ def init_session2():
         "before_scores": [],
         "after_scores": [],
         "timeline": [],  # list of dicts: {step, action, reason}
+        "events": [],
+        "run_result": None,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -276,53 +200,6 @@ def render_config_editor(config: dict) -> dict:
     return parsed
 
 
-def render_log_stream(logs: str, job_id: Optional[str]):
-    """Render a streaming log output area."""
-    st.markdown("### 📜 Live Logs")
-    st.caption(f"Job ID: {job_id or '—'}")
-    st.text_area(
-        "Logs",
-        value=logs,
-        height=200,
-        key="log_area",
-        disabled=True,
-    )
-
-
-def render_loss_curve(history: List[Dict[str, any]]) -> None:
-    """Render a loss/LR/GPU usage chart using Plotly."""
-    if not history:
-        st.info("No data yet — launch a job to see curves.")
-        return
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(y=[], mode="lines", name="loss", line=dict(color="#1f77b4")))
-    fig.add_trace(go.Scatter(y=[], mode="lines", name="learning_rate", line=dict(color="#ff7f0e")))
-    fig.update_layout(
-        title="Training Metrics (per step)",
-        xaxis_title="Step",
-        yaxis_title="Value",
-        hovermode="x unified",
-        height=300,
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def render_timeline(timeline: List[Dict[str, str]]) -> None:
-    """Render the agent decision timeline."""
-    st.markdown("### 🧠 Agent Decision Timeline")
-    if not timeline:
-        st.caption("No decisions yet — launch a job to see the loop.")
-        return
-
-    for entry in timeline:
-        with st.expander(f"Step {entry.get('step', '?')}: {entry.get('action', '?')}"):
-            reason = entry.get("reason", "—")
-            config_change = entry.get("config_change", "—")
-            st.markdown(f"**Reason:** {reason}")
-            st.markdown(f"**Config change:** `{config_change}`")
-
-
 def render_eval_panel(
     before_scores: List[float],
     after_scores: List[float],
@@ -381,6 +258,113 @@ def render_eval_panel(
                 st.warning("Please enter a prompt.")
 
 
+def _make_llm() -> NemotronClient:
+    # Imported here so package settings initialize AFTER _load_env() above.
+    from supertaco.settings import settings
+
+    return NemotronClient(
+        base_url=settings.token_factory_base_url,
+        api_key=settings.nebius_api_key.get_secret_value(),
+    )
+
+
+def _render_events(events: list) -> str:
+    """Build the full timeline markdown from collected events."""
+    if not events:
+        return "No decisions yet — launch a job to see the loop."
+    lines = []
+    for ev in events:
+        d = ev.data
+        if ev.type == "job_launched":
+            lines.append(
+                f"**Attempt {d['attempt']}** · 🚀 dry-run launch "
+                f"({len(d['payload'].get('config', {}))} config keys)"
+            )
+        elif ev.type == "failure_detected":
+            lines.append(f"**Attempt {d['attempt']}** · ❌ detected `{d['failure_key']}`")
+        elif ev.type == "classified":
+            mark = "⚠️ diverges from playbook" if d["diverged"] else "agrees with playbook"
+            lines.append(
+                f"**Attempt {d['attempt']}** · 🤖 Nemotron nano → "
+                f"`{d['nemotron_verdict']}` ({d['mode']}, {mark})"
+            )
+        elif ev.type == "patch_proposed":
+            reason = (
+                d["proposal"].get("reason", d["proposal"])
+                if isinstance(d["proposal"], dict)
+                else d["proposal"]
+            )
+            lines.append(f"**Attempt {d['attempt']}** · 🧩 model reasoning: {reason}")
+        elif ev.type == "patch_written":
+            before, after = d.get("before", {}), d.get("after", {})
+            changed = ", ".join(
+                f"{k}: {before.get(k)!r}→{after[k]!r}"
+                for k in after
+                if before.get(k) != after.get(k)
+            )
+            lines.append(
+                f"**Attempt {d['attempt']}** · 💾 patched `{d['failure_key']}` → "
+                f"`{d['path']}`\n   `{changed}`"
+            )
+        elif ev.type == "retry_scheduled":
+            lines.append(f"🔁 relaunching (attempt {d['next_attempt']})")
+        elif ev.type == "run_succeeded":
+            lines.append(f"✅ **Healed** after {d['attempts']} attempt(s)")
+        elif ev.type == "run_failed":
+            lines.append(f"🛑 **Failed**: {d['error']}")
+    return "\n\n".join(lines)
+
+
+def _loss_figure(events: list):
+    """Per-attempt loss series parsed from generated logs (spec 5.5)."""
+    import math
+
+    fig = go.Figure()
+    for ev in events:
+        if ev.type != "logs_produced":
+            continue
+        points = [None if math.isnan(v) else v for v in ev.data["loss_points"]]
+        fig.add_trace(go.Scatter(y=points, mode="lines", name=f"attempt {ev.data['attempt']}"))
+    fig.update_layout(
+        title="Training loss (dry-run, per attempt)",
+        xaxis_title="Step",
+        yaxis_title="Loss",
+        hovermode="x unified",
+        height=300,
+    )
+    return fig
+
+
+def _llm_rows(calls: list) -> list:
+    return [
+        {
+            "model": c.get("model_key"),
+            "id": c.get("model_id"),
+            "mode": c.get("mode"),
+            "tokens": c.get("tokens"),
+            "latency_s": c.get("latency"),
+            "error": (c.get("error") or "")[:60],
+        }
+        for c in calls
+    ]
+
+
+def execute_launch(config: dict, max_retries: int, timeline_slot, logs_slot, chart_slot):
+    """Run the pipeline, streaming events into the status placeholders."""
+    events: list[Event] = []
+
+    def on_event(ev: Event) -> None:
+        events.append(ev)
+        st.session_state["events"] = events  # survive a mid-run crash (spec 6)
+        timeline_slot.markdown(_render_events(events))
+        if ev.type == "logs_produced":
+            logs_slot.code(ev.data["text"], language="log")
+            chart_slot.plotly_chart(_loss_figure(events), use_container_width=True)
+
+    result = runner_run(config, max_retries=max_retries, on_event=on_event, llm=_make_llm())
+    return events, result
+
+
 # ─── Main App ─────────────────────────────────────────────────────
 def main():
     init_session2()
@@ -399,48 +383,56 @@ def main():
 
         c1, c2 = st.columns(2)
         with c1:
-            st.checkbox("Dry-run (no GPU credits)", value=True)
+            st.checkbox("Dry-run (Nebius GPU jobs stay dry-run until Gate 1)", value=True)
         with c2:
             st.text_input("Job label", value=f"run-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}")
 
-        if st.button("▶ Launch Job", type="primary", use_container_width=True):
-            cfg_parsed = cfg
-            st.session_state["config"] = cfg_parsed
-
-            failure_key = (
-                detect_failure(st.session_state.get("logs", ""))
-                if st.session_state.get("logs")
-                else None
-            )
-
-            with st.spinner("Launching job via Token Factory..."):
-                try:
-                    # Simplified agent loop dry-run
-                    result = {
-                        "job_id": f"sim_{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}",
-                        "final_failure_key": failure_key,
-                        "retry_count": st.session_state.get("max_retries", 3),
-                        "final_logs": st.session_state.get("logs", ""),
-                        "timeline": st.session_state.get("timeline", []),
-                    }
-                    st.session_state["job_id"] = result["job_id"]
-                    st.session_state["failure_key"] = result["final_failure_key"]
-                    st.session_state["retry_count"] = st.session_state["max_retries"]
-                    st.session_state["logs"] = result["final_logs"]
-                    st.session_state["timeline"] = result["timeline"]
-
-                    st.toast("✅ Job launched (dry-run)", icon="✅")
-                except Exception as exc:
-                    st.error(f"❌ Job launch failed: {exc}")
-
-            st.rerun()
+        run_clicked = st.button("▶ Launch Job", type="primary", use_container_width=True)
+        cfg_for_run = cfg
 
     # ── Right Column: Monitor & Metrics ────────────────────────────
     with st.container(border=True):
         st.markdown("### 📡 Job Status & Logs")
-        render_log_stream(st.session_state.get("logs", ""), st.session_state.get("job_id"))
-        render_loss_curve([])
-        render_timeline(st.session_state.get("timeline", []))
+        timeline_slot = st.empty()
+        logs_slot = st.empty()
+        chart_slot = st.empty()
+
+        if run_clicked:
+            try:
+                events, result = execute_launch(
+                    cfg_for_run,
+                    st.session_state.get("max_retries", 3),
+                    timeline_slot,
+                    logs_slot,
+                    chart_slot,
+                )
+                st.session_state["events"] = events
+                st.session_state["run_result"] = result
+                if not result.success:
+                    st.error(f"🛑 {result.error}")
+                else:
+                    st.toast("✅ Run healed", icon="✅")
+            except ConfigurationError as exc:
+                st.error(f"❌ {exc}")
+            except Exception as exc:  # spec 6: never a Streamlit traceback
+                st.error(f"❌ Run crashed: {exc}")
+                timeline_slot.markdown(_render_events(st.session_state.get("events", [])))
+        elif st.session_state.get("events"):
+            timeline_slot.markdown(_render_events(st.session_state["events"]))
+            latest_logs = next(
+                (
+                    e.data["text"]
+                    for e in reversed(st.session_state["events"])
+                    if e.type == "logs_produced"
+                ),
+                "",
+            )
+            logs_slot.code(latest_logs or "—", language="log")
+            chart_slot.plotly_chart(
+                _loss_figure(st.session_state["events"]), use_container_width=True
+            )
+        else:
+            timeline_slot.info("No run yet — load a config and press Launch.")
 
     # ── Bottom Row: Evaluation ──────────────────────────────────────
     st.markdown("---")

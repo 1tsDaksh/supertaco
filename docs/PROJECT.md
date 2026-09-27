@@ -24,6 +24,7 @@ and LLaMA-Factory + LoRA for the actual training.
 verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
+- 2026-09-24: dashboard: live event-driven launch with timeline, log stream, loss chart (plan Task 8).
 - 2026-09-24: cli: clean SystemExit messages for config/validation errors; failure-path pins (plan Task 7 review fixes).
 - 2026-09-24: cli: run subcommand rewired to shared runner; F821 crashes resolved (plan Task 7).
 - 2026-09-24: eval: numerator-first parse for X/10 judge replies; suite slice + hash-mode pins (plan Task 6 review fixes).
