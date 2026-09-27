@@ -1185,7 +1185,7 @@ def test_fraction_replies_parse_numerator():
 
 
 def test_suite_caps_at_five_prompts():
-    llm = FakeLLM(["5"] * 10)
+    llm = FakeLLM(["5"] * 15)  # 5 prompts x 2 calls = 10 used, 5 left if capped
     extra = DEFAULT_PROMPTS + ["sixth prompt"]
     base = {p: "b" for p in extra}
     ft = {p: "f" for p in extra}
