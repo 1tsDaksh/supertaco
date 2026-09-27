@@ -88,7 +88,8 @@ def run(
 
     max_retries counts RELAUNCHES: initial attempt + up to max_retries
     relaunches; if the final attempt's logs still fail -> run_failed
-    (handoff invariant 1). Never raises for expected failures.
+    (handoff invariant 1). Validation raises ConfigurationError before any
+    event; every other failure returns success=False instead of raising.
     """
     validate_config(config)
     log_fn = log_fn or generate_logs
@@ -97,7 +98,7 @@ def run(
 
     if not dry_run:
         error = "Real Nebius jobs are not implemented yet (Gate 1)"
-        _emit(on_event, "run_failed", error=error, attempts=0, failure_key=None)
+        _emit(on_event, "run_failed", error=error, attempts=0, failure_key=None, path=None)
         return RunResult(False, 0, dict(config), [], None, error, [])
 
     from supertaco.settings import settings

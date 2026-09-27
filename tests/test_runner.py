@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from supertaco.errors import ConfigurationError
-from supertaco.runner import Event, RunResult, run  # noqa: F401
+from supertaco.runner import Event, RunResult, run
 
 HEALTHY = {
     "learning_rate": 2e-5,
@@ -62,6 +62,7 @@ def test_validation_rejects_empty_config(tmp_path):
 def test_success_path_healthy_config(tmp_path):
     events, on_event = _collect()
     result = run(HEALTHY, on_event=on_event, llm=FakeLLM(), runs_dir=tmp_path)
+    assert isinstance(result, RunResult)
     assert result.success is True
     assert result.attempts == 1
     assert result.error is None
@@ -124,6 +125,9 @@ def test_retry_cap_emits_run_failed(tmp_path):
     assert "MaxRetriesExceeded" in result.error
     assert events[-1].type == "run_failed"
     assert len(result.configs_written) == 3  # one patch per relaunch decision
+    assert len(set(result.configs_written)) == 3  # never overwrite (invariant 3)
+    assert all(Path(p).exists() for p in result.configs_written)
+    assert result.failure_key == "NAN_LOSS"
     assert sum(1 for e in events if e.type == "patch_written") == 3
 
 
@@ -141,3 +145,31 @@ def test_real_jobs_not_implemented_returns_failed_result(tmp_path):
     assert result.success is False
     assert "Gate 1" in result.error
     assert events[-1].type == "run_failed"
+
+
+def test_no_callback_still_runs(tmp_path):
+    result = run(HEALTHY, llm=FakeLLM(), runs_dir=tmp_path)
+    assert result.success is True
+    assert result.attempts == 1
+
+
+def test_max_retries_zero_gate(tmp_path):
+    events, on_event = _collect()
+
+    def always_nan(config: dict) -> str:
+        return "step 0 loss NaN"
+
+    result = run(
+        BROKEN_NAN,
+        on_event=on_event,
+        llm=FakeLLM(),
+        log_fn=always_nan,
+        max_retries=0,
+        runs_dir=tmp_path,
+    )
+    assert result.success is False
+    assert result.attempts == 1
+    assert result.configs_written == []
+    types = [e.type for e in events]
+    assert "patch_written" not in types
+    assert types[-1] == "run_failed"
