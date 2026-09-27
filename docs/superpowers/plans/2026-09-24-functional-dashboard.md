@@ -363,6 +363,9 @@ def test_precedence_multi_trigger_configs_surface_first_rule():
     ({"learning_rate": 1.4e-6}, "LOSS_PLATEAU"),
     ({"learning_rate": 2e-5, "lora_r": 31, "num_epochs": 10}, None),
     ({"learning_rate": 2e-5, "lora_r": 32, "num_epochs": 10}, "EVAL_REGRESSION"),
+    ({"learning_rate": 0.05, "num_epochs": 8, "chat_template": "llama-3"}, "LOSS_DIVERGENCE"),
+    ({"learning_rate": 0.05, "num_epochs": 8, "chat_template": "llama-3",
+      "gradient_clip_norm": 1.0}, None),
 ])
 def test_rule_table_boundaries(config, mode):
     assert classify_config_failure(config) == mode
@@ -543,7 +546,7 @@ def extract_loss_points(log_text: str) -> list[float]:
 python -m pytest tests/test_simlogs.py -v
 ```
 
-Expected: 35 passed (8 fixtures + 5 demos + 8 healing + 5 singles + 1 precedence + 8 boundaries). If `test_healthy... plateau` fails, adjust healthy decay constant (`0.06` → steeper) — never the rule table.
+Expected: 37 passed (8 fixtures + 5 demos + 8 healing + 5 singles + 1 precedence + 10 boundaries). If `test_healthy... plateau` fails, adjust healthy decay constant (`0.06` → steeper) — never the rule table.
 
 - [ ] **Step 5: Lint + commit**
 
