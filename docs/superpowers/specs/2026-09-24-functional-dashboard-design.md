@@ -71,8 +71,8 @@ Dashboard (Streamlit)                     CLI (supertaco run <cfg> --dry-run)
 6. **Patch authority = playbook** (deterministic healing; demo cannot flail).
    Real Nemotron super/ultra output is displayed as the model's reasoning beside
    each patch; nano-vs-playbook classification divergence is flagged visually but
-   never blocks. Every LLM call appends to `logs/llm_calls.jsonl`
-   (handoff invariant 2 — not actually implemented today).
+never blocks. Every LLM call appends to `logs/llm_calls.jsonl`
+(handoff invariant 2; written by the client's per-call recorder).
 
 ### Event catalog
 
@@ -84,6 +84,29 @@ run_failed(error, attempts) · eval_scored(prompt, base, fine_tuned)`
 
 Delivery: `on_event` callback. Dashboard appends to session state and updates
 `st.empty()` placeholders for live rendering; CLI prints one line per event.
+
+**As-built amendment (2026-09-28):** the runner emits these 10 types with these
+payload keys (verified against `supertaco/runner.py`):
+
+| Event | As-built payload |
+|---|---|
+| `run_started` | `max_retries, dry_run` |
+| `job_launched` | `attempt, payload` |
+| `logs_produced` | `attempt, text, loss_points` |
+| `failure_detected` | `attempt, failure_key` |
+| `classified` | `attempt, failure_key, nemotron_verdict, mode, diverged` |
+| `patch_proposed` | `attempt, failure_key, proposal` |
+| `patch_written` | `attempt, path, failure_key, before, after` |
+| `retry_scheduled` | `next_attempt` |
+| `run_succeeded` | `attempts, configs_written` |
+| `run_failed` | `error, attempts, failure_key, path` (`path=None` on Gate 1) |
+
+Dropped from the draft catalog above: **`llm_call`** and **`eval_scored`** are not
+emitted as events — per-call rows live in `session_state["llm_calls"]` +
+`logs/llm_calls.jsonl` (LLM table + sidebar banner), and eval scores in
+`session_state["eval_results"]` (eval panel). Dashboard timeline renders 8 types;
+`logs_produced` routes to the log/chart placeholders and `run_started` has no
+timeline line.
 
 ## 5. Components
 
@@ -121,8 +144,11 @@ Notes:
 
 ```python
 run(config, *, max_retries=3, dry_run=True, on_event, log_fn=generate_logs,
-    llm=None, judge=None) -> RunResult
+    llm=None) -> RunResult
 ```
+
+(As-built: no `judge` param — eval runs outside the runner via
+`supertaco.eval.harness`, gated on `run_result.success` in the eval panel.)
 
 - Owns launch→generate→detect→classify→patch→relaunch loop and retry cap.
 - `log_fn` injectable for tests (default: real generator).
@@ -139,8 +165,8 @@ run(config, *, max_retries=3, dry_run=True, on_event, log_fn=generate_logs,
   go straight to fallback — dead API costs one timeout, not ten.
 - Fallback → existing `_simulate_response`; every call records
   `mode=real|fallback`, latency, tokens (API `usage`), error string.
-- `log_call` additionally appends JSONL to `logs/llm_calls.jsonl` (invariant 2);
-  write failure → warning only, never kills a run.
+- The per-call recorder additionally appends JSONL to `logs/llm_calls.jsonl`
+  (invariant 2); write failure → warning only, never kills a run.
 
 ### 5.4 `supertaco/eval/` — real judge, mock responses
 
@@ -159,16 +185,20 @@ run(config, *, max_retries=3, dry_run=True, on_event, log_fn=generate_logs,
   config before/after diff.
 - **Loss chart**: per-attempt series parsed from generated `loss:` lines
   (replaces empty traces).
-- **LLM-calls table**: model, tokens, latency, real/fallback, escalation reason.
+- **LLM-calls table**: model, tokens, latency, real/fallback, error (fallback cause).
 - **Sidebar**: persistent fallback-warning banner; fixture loader dropdown reading
   `configs/runs/*.yaml` (alongside existing demo configs); key-presence captions kept.
 - **Dry-run checkbox relabeled** to state honestly that Nebius jobs stay dry-run
   until Gate 1.
-- **Eval panel**: real scores after run completion; disabled with hint otherwise.
+- **Eval panel**: real scores after run completion; gated with hint otherwise
+  (as-built: the button is omitted until a successful run exists, not rendered
+  disabled).
 - Settings: keeps `_load_env()` (env-var precedence over `.env`), then imports
   package settings/clients through the runner seam only.
-- **Import surface (explicit)**: dashboard imports `supertaco.runner` (run path)
-  and `supertaco.eval.harness` / `supertaco.eval.judges` (eval panel) — no other
+- **Import surface (explicit, as-built)**: dashboard imports `supertaco.runner`
+  (run path + the shared `make_llm` client factory), `supertaco.eval.harness` /
+  `supertaco.eval.judges` (eval panel), and `supertaco.errors.ConfigurationError`
+  (typed-exception leaf, caught for the spec-6 no-traceback guard) — no other
   package internals, and no duplicated pipeline logic.
 - **Invariant change**: dashboard drops "self-contained by duplication" for one
   narrow import (`supertaco.runner` + helpers). Documented in HANDOFF §5.
@@ -196,7 +226,7 @@ run(config, *, max_retries=3, dry_run=True, on_event, log_fn=generate_logs,
 | Empty config / no `learning_rate` | Validated before run; clear message; no run starts |
 | Editor YAML typo | Existing behavior: inline parse error, previous config used |
 | `llm_calls.jsonl` write failure | Warning only |
-| Eval before any run | Button disabled with hint |
+| Eval before any run | Button gated (omitted) with hint |
 | Concurrent launches | Impossible: synchronous inside one button handler; rerun resets placeholders |
 | Dry-run networking | Zero Nebius HTTP (client wrapper may be constructed; `launch_job(dry_run=True)` never hits network) — invariant 4 reworded accordingly |
 
