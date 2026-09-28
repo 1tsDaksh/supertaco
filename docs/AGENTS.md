@@ -65,8 +65,8 @@ python -m supertaco.cli run configs/runs/20260923_191506_NAN_LOSS_broken_model.y
 
 ## Cost guardrails (hackathon credits are finite)
 
-- Default to the cheapest model that can do the job: `nvidia/nemotron-3-nano` for classification,
-  `nvidia/nemotron-3-super` for patching, `nvidia/nemotron-3-ultra` ONLY when confidence < threshold
+- Default to the cheapest model that can do the job: `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` for classification,
+  `nvidia/nemotron-3-super-120b-a12b` for patching, `nvidia/Nemotron-3-Ultra-550b-a55b` ONLY when confidence < threshold
   or playbook has no matching failure mode.
 - Every loop iteration (launch → diagnose → relaunch) is capped at **3 retries**, then hard stop
   with a user-facing summary.

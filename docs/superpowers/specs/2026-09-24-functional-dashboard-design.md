@@ -159,8 +159,9 @@ run(config, *, max_retries=3, dry_run=True, on_event, log_fn=generate_logs,
 ### 5.3 `supertaco/agent/llm.py` — real Token Factory calls
 
 - `_call()` uses the already-installed `openai` SDK against
-  `TOKEN_FACTORY_BASE_URL` with `nvidia/nemotron-3-{nano,super,ultra}` (README IDs),
-  30s timeout.
+  `TOKEN_FACTORY_BASE_URL` with the Token Factory catalog IDs (see README —
+  `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` / `nvidia/nemotron-3-super-120b-a12b` /
+  `nvidia/Nemotron-3-Ultra-550b-a55b`), 30s timeout.
 - **Circuit breaker**: after the first failure in a run, later calls skip HTTP and
   go straight to fallback — dead API costs one timeout, not ten.
 - Fallback → existing `_simulate_response`; every call records

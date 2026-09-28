@@ -9,9 +9,9 @@ class NemotronClient:
     """
 
     MODELS = {
-        "classify": "nvidia/nemotron-3-nano",
-        "patch": "nvidia/nemotron-3-super",
-        "deep_reason": "nvidia/nemotron-3-ultra",
+        "classify": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B",
+        "patch": "nvidia/nemotron-3-super-120b-a12b",
+        "deep_reason": "nvidia/Nemotron-3-Ultra-550b-a55b",
     }
 
     def __init__(self, base_url: str, api_key: str, timeout: float = 30.0):

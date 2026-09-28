@@ -45,7 +45,7 @@ _NEBIUS_PROJECT_ID = os.getenv("NEBIUS_PROJECT_ID", "")
 _NEBIUS_API_KEY = os.getenv("NEBIUS_API_KEY", "")
 _TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 _TOKEN_FACTORY_BASE_URL = os.getenv(
-    "TOKEN_FACTORY_BASE_URL", "https://api.token.factory.nvidia.com/v1"
+    "TOKEN_FACTORY_BASE_URL", "https://api.tokenfactory.nebius.com/v1"
 )
 
 

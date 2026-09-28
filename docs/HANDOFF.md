@@ -132,7 +132,7 @@ Settings load from `.env` (gitignored). Required variables:
 | `NEBIUS_API_KEY` | Token Factory + AI Cloud auth |
 | `TAVILY_API_KEY` | Error-context search |
 | `NEBIUS_PROJECT_ID` | Nebius project |
-| `TOKEN_FACTORY_BASE_URL` | OpenAI-compatible endpoint (`https://api.token.factory.nvidia.com/v1`) |
+| `TOKEN_FACTORY_BASE_URL` | OpenAI-compatible endpoint (`https://api.tokenfactory.nebius.com/v1`) |
 | `SANDBOXTUNE_ENV` | `dev` \| `prod` (prod blocks dry-run bypasses) |
 
 > **Note:** the `SANDBOXTUNE_ENV` variable name predates the rename and is kept for backward

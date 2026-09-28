@@ -25,9 +25,9 @@
 ## Model endpoints (Nebius Token Factory, OpenAI-compatible)
 | Role | Model ID | Use |
 |---|---|---|
-| Fast classify | `nvidia/nemotron-3-nano` | Log triage, failure classification |
-| Patch/draft | `nvidia/nemotron-3-super` | Config patches, fix proposals |
-| Deep reason | `nvidia/nemotron-3-ultra` | Low-confidence or novel failures ONLY |
+| Fast classify | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | Log triage, failure classification |
+| Patch/draft | `nvidia/nemotron-3-super-120b-a12b` | Config patches, fix proposals |
+| Deep reason | `nvidia/Nemotron-3-Ultra-550b-a55b` | Low-confidence or novel failures ONLY |
 
 Cost routing rule: start at nano; escalate to super on low confidence; ultra only when playbook
 misses. Log every escalation.
