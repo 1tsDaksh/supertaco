@@ -64,7 +64,7 @@ def _write_config(config: dict, failure_key: str, runs_dir: Path) -> str:
     return str(path)
 
 
-def _default_llm():
+def make_llm():
     from supertaco.agent.llm import NemotronClient
     from supertaco.settings import settings
 
@@ -93,7 +93,7 @@ def run(
     """
     validate_config(config)
     log_fn = log_fn or generate_logs
-    llm = llm or _default_llm()
+    llm = llm or make_llm()
     _emit(on_event, "run_started", max_retries=max_retries, dry_run=dry_run)
 
     if not dry_run:

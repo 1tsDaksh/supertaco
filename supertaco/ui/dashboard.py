@@ -16,9 +16,8 @@ import plotly.graph_objects as go
 import streamlit as st
 import yaml
 
-from supertaco.agent.llm import NemotronClient
 from supertaco.errors import ConfigurationError
-from supertaco.runner import Event
+from supertaco.runner import Event, make_llm
 from supertaco.runner import run as runner_run
 
 
@@ -245,7 +244,7 @@ def render_eval_panel() -> None:
 
         with st.spinner("Scoring with Nemotron judge..."):
             base_responses, ft_responses = build_responses(result.final_config)
-            eval_llm = _make_llm()  # fresh client -> fresh circuit breaker
+            eval_llm = make_llm()  # fresh client -> fresh circuit breaker
             suite_results = run_eval_suite(
                 DEFAULT_PROMPTS, base_responses, ft_responses, llm=eval_llm
             )
@@ -277,16 +276,6 @@ def render_eval_panel() -> None:
         },
         use_container_width=True,
         hide_index=True,
-    )
-
-
-def _make_llm() -> NemotronClient:
-    # Imported here so package settings initialize AFTER _load_env() above.
-    from supertaco.settings import settings
-
-    return NemotronClient(
-        base_url=settings.token_factory_base_url,
-        api_key=settings.nebius_api_key.get_secret_value(),
     )
 
 
@@ -333,7 +322,9 @@ def _render_events(events: list) -> str:
         elif ev.type == "run_succeeded":
             lines.append(f"✅ **Healed** after {d['attempts']} attempt(s)")
         elif ev.type == "run_failed":
-            lines.append(f"🛑 **Failed**: {d['error']}")
+            detail = f" · attempts {d['attempts']}" if d.get("attempts") is not None else ""
+            last = f" · last `{d['path']}`" if d.get("path") else ""
+            lines.append(f"🛑 **Failed**: {d['error']}{detail}{last}")
     return "\n\n".join(lines)
 
 
@@ -394,7 +385,7 @@ def execute_launch(
         config,
         max_retries=max_retries,
         on_event=on_event,
-        llm=_make_llm(),
+        llm=make_llm(),
         dry_run=dry_run,
     )
     return events, result
@@ -438,6 +429,7 @@ def main():
             st.session_state["run_result"] = None  # never trust a stale result
             st.session_state["llm_calls"] = []  # stale calls must not outlive a failed run
             st.session_state["eval_results"] = None  # stale eval must not score a newer run
+            st.session_state["events"] = []  # stale timeline must not outlive a failed run
             try:
                 events, result = execute_launch(
                     cfg_for_run,

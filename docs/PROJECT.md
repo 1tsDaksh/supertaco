@@ -24,6 +24,7 @@ and LLaMA-Factory + LoRA for the actual training.
 verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
+- 2026-09-28: runner/cli/dashboard: single shared `make_llm` factory through the runner seam; run_failed timeline shows attempts + last config path; stale events cleared on launch (final review fixes).
 - 2026-09-28: Functional dashboard: shared event-emitting runner, config-derived dry-run logs, real Nemotron calls with fallback, real judge eval, CLI rewired.
 - 2026-09-28: dashboard: clear stale eval results on launch; fixture loader hardened (BOM, YAMLError, non-dict); eval-gating + banner count pins (plan Task 9 review fixes).
 - 2026-09-27: dashboard: fixture loader, Nemotron fallback banner, LLM call table, real judge eval suite, dry-run checkbox wired (plan Task 9).

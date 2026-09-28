@@ -13,10 +13,9 @@ import sys
 
 import yaml
 
-from supertaco.agent.llm import NemotronClient
 from supertaco.errors import ConfigurationError
+from supertaco.runner import make_llm as _make_llm
 from supertaco.runner import run as runner_run
-from supertaco.settings import settings
 
 
 def main() -> None:
@@ -35,13 +34,6 @@ def main() -> None:
     else:
         parser.print_help()
         sys.exit(0)
-
-
-def _make_llm() -> NemotronClient:
-    return NemotronClient(
-        base_url=settings.token_factory_base_url,
-        api_key=settings.nebius_api_key.get_secret_value(),
-    )
 
 
 def run_config(config_path: str, dry_run: bool = True) -> None:

@@ -92,6 +92,7 @@ def test_validation_error_shows_no_traceback(app):
     assert not app.exception, [e.value for e in app.exception]
     assert any("learning_rate" in e.value for e in app.error)
     assert app.session_state["run_result"] is None
+    assert app.session_state["events"] == []
 
 
 def test_crash_never_shows_traceback(app, monkeypatch):
@@ -150,3 +151,35 @@ def test_new_launch_clears_stale_eval(app):
     launch = next(b for b in app.button if "Launch Job" in b.label)
     launch.click().run()
     assert app.session_state["eval_results"] is None
+
+
+def test_render_events_shows_run_failed_details():
+    from supertaco.runner import Event
+    from supertaco.ui.dashboard import _render_events
+
+    md = _render_events(
+        [
+            Event(
+                type="run_failed",
+                data={
+                    "error": "MaxRetriesExceeded: 3 relaunches exhausted",
+                    "attempts": 4,
+                    "failure_key": "NAN_LOSS",
+                    "path": "configs/runs/demo_patched.yaml",
+                },
+            ),
+            Event(
+                type="run_failed",
+                data={
+                    "error": "Real Nebius jobs are not implemented yet (Gate 1)",
+                    "attempts": 0,
+                    "failure_key": None,
+                    "path": None,
+                },
+            ),
+        ]
+    )
+    assert "attempts 4" in md
+    assert "configs/runs/demo_patched.yaml" in md
+    assert "Gate 1" in md
+    assert "attempts 0" in md
