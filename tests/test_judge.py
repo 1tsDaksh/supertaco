@@ -44,6 +44,21 @@ def test_unparseable_judge_output_falls_back_to_hash():
     assert 2.0 <= result.score <= 10.0
 
 
+def test_judge_requests_enough_tokens_for_reasoning_model():
+    seen = {}
+
+    class _Recorder:
+        call_log = []
+
+        def _call(self, model_key, prompt, max_tokens=1024, temperature=0.0):
+            seen["max_tokens"] = max_tokens
+            return "8/10"
+
+    score_response("p", "r", llm=_Recorder())
+    # Nemotron-3 burns reasoning tokens before the answer; 16 -> empty content -> hash.
+    assert seen["max_tokens"] >= 256
+
+
 def test_build_responses_shapes_and_health_dependence():
     healthy = {
         "learning_rate": 2e-5,

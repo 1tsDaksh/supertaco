@@ -23,6 +23,10 @@ secrets.json
 logs/*.jsonl
 logs/*.log
 
+# Runtime artifacts from dashboard runs (cwd-relative under supertaco/)
+supertaco/logs/
+supertaco/configs/runs/
+
 # Configs runs (generated, not committed except examples)
 configs/runs/*
 !configs/runs/*_example.yaml

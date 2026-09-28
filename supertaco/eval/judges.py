@@ -40,7 +40,7 @@ def score_response(
     text = llm._call(
         judge_model_key,
         JUDGE_PROMPT.format(prompt=prompt, response=response),
-        max_tokens=16,
+        max_tokens=512,  # Nemotron-3 reasons before answering; 16 -> empty content -> hash
         temperature=0.0,
     )
     http_mode = "real"
