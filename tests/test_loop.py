@@ -81,9 +81,10 @@ def responses_for(prompts, base="base", ft="fine"):
 class FakeLLM:
     """Judge scores alternate base/ft calls; classify/patch are deterministic."""
 
-    def __init__(self, healthy=True):
+    def __init__(self, healthy=True, heal_after_first_eval=False):
         self.call_log = []
         self.healthy = healthy
+        self.heal_after_first_eval = heal_after_first_eval
         self._n = 0
 
     def classify_failure(self, logs):
@@ -104,7 +105,11 @@ class FakeLLM:
         )
         is_base = self._n % 2 == 0
         self._n += 1
-        if self.healthy:
+        if self.heal_after_first_eval:
+            healthy_now = self._n > 10  # first eval = 10 calls (5 prompts x base/ft) regresses
+        else:
+            healthy_now = self.healthy
+        if healthy_now:
             return "9/10" if not is_base else "5/10"
         return "3/10" if not is_base else "9/10"  # ft worse -> regression
 
@@ -405,3 +410,91 @@ def test_run_started_emitted_before_llm_construction(monkeypatch):
     assert result.success is False
     assert seen_at_construction, "make_llm must be constructed (proves llm=None path)"
     assert seen_at_construction[0] == "run_started"
+
+
+# ---------- Task 5: eval gate pins ----------
+
+
+def test_eval_regression_triggers_patch_then_heals():
+    transport = FakeTransport(
+        [
+            lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts)),
+            lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts)),
+        ]
+    )
+    llm = FakeLLM(heal_after_first_eval=True)  # eval 1 regressed, eval 2 healthy
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {
+            "learning_rate": 2e-4,
+            "lora_r": 8,
+            "lora_alpha": 16,
+            "num_epochs": 3,
+            "model": "qwen2.5-0.5b",
+        },
+        transport=transport,
+        llm=llm,
+        on_event=on_event,
+        runs_dir=str(_tmp_runs()),
+    )
+    failure_events = [e for e in events if e.type == "failure_detected"]
+    assert failure_events[0].data["failure_key"] == "EVAL_REGRESSION"
+    patch = next(e for e in events if e.type == "patch_written")
+    assert patch.data["failure_key"] == "EVAL_REGRESSION"
+    assert patch.data["after"]["lora_r"] == 8  # max(8, 8//2) floors at 8
+    assert patch.data["after"]["lora_alpha"] == 16  # floor at 16
+    assert patch.data["after"]["num_epochs"] == 2  # -1 epoch
+    assert result.success is True
+    assert result.attempts == 2
+    # review addendum: classify sees HEALTHY logs on an eval regression -> verdict must diverge
+    classified = next(e for e in events if e.type == "classified")
+    assert classified.data["failure_key"] == "EVAL_REGRESSION"
+    assert classified.data["diverged"] is True
+
+
+def test_healthy_but_no_responses_block_is_honest_failure():
+    transport = FakeTransport([make_result(HEALTHY_LOG)])  # no block
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=on_event,
+    )
+    assert result.success is False
+    assert "RESPONSES_JSON" in (result.error or "")
+    assert [e.type for e in events][-1] == "run_failed"
+    assert len(result.attempt_ledger) == 1  # partial record survives fail-fast (D5)
+    assert len(result.attempt_ledger[0].loss_points) == 3  # HEALTHY_LOG has 3 loss lines
+
+
+def test_log_failure_and_eval_regression_share_one_budget():
+    transport = FakeTransport(
+        [
+            make_result(NAN_LOG),
+            lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts)),
+        ]
+    )
+    llm = FakeLLM(healthy=False)  # ALWAYS regresses: eval 2 can never heal within max_retries=1
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {
+            "learning_rate": 0.1,
+            "batch_size": 8,
+            "lora_r": 8,
+            "lora_alpha": 16,
+            "num_epochs": 3,
+            "model": "qwen2.5-0.5b",
+        },
+        transport=transport,
+        llm=llm,
+        on_event=on_event,
+        max_retries=1,
+        runs_dir=str(_tmp_runs()),
+    )
+    assert result.success is False
+    assert "MaxRetriesExceeded" in (result.error or "")
+    assert result.attempts == 2  # 1 log failure + 1 eval regression SHARE the single relaunch
+    assert [r.failure_key for r in result.attempt_ledger] == ["NAN_LOSS", "EVAL_REGRESSION"]
+    assert len(result.configs_written) == 1  # attempt 2 breaks before patching
+    assert [e.type for e in events][-1] == "run_failed"
