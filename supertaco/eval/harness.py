@@ -191,7 +191,7 @@ def split_responses(log_text: str) -> tuple[str, dict | None]:
     train_logs = (log_text[:start] + log_text[end + len(RESPONSES_END) :]).strip()
     try:
         payload = json.loads(inner)
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError, RecursionError):
         return train_logs, None
     if not isinstance(payload, dict):
         return train_logs, None
