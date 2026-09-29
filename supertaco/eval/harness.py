@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 PROMPT_SUITE_SIZE = 5
@@ -166,3 +167,39 @@ def run_eval_suite(
 def check_regression(eval_results: dict) -> bool:
     """True when fine-tuned average is >10% below baseline."""
     return eval_results.get("regression_flagged", False)
+
+
+RESPONSES_START = "###RESPONSES_JSON###"
+RESPONSES_END = "###END_RESPONSES_JSON###"
+
+
+def split_responses(log_text: str) -> tuple[str, dict | None]:
+    """Strip the responses marker block from train logs and parse it.
+
+    Tolerant by design: unterminated block, bad JSON, or a payload without
+    string-valued `base`/`fine_tuned` dicts returns (logs, None); the block is
+    still stripped when the markers are present and terminated.
+    """
+    start = log_text.find(RESPONSES_START)
+    if start < 0:
+        return log_text, None
+    end = log_text.find(RESPONSES_END, start)
+    train_logs = log_text
+    if end < 0:
+        return train_logs, None
+    inner = log_text[start + len(RESPONSES_START) : end].strip()
+    train_logs = (log_text[:start] + log_text[end + len(RESPONSES_END) :]).strip()
+    try:
+        payload = json.loads(inner)
+    except (json.JSONDecodeError, ValueError):
+        return train_logs, None
+    if not isinstance(payload, dict):
+        return train_logs, None
+    base, ft = payload.get("base"), payload.get("fine_tuned")
+    if not isinstance(base, dict) or not isinstance(ft, dict):
+        return train_logs, None
+    if not base or not ft or not all(isinstance(v, str) for v in base.values()):
+        return train_logs, None
+    if not all(isinstance(v, str) for v in ft.values()):
+        return train_logs, None
+    return train_logs, payload

@@ -25,6 +25,7 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
 
+- 2026-09-29: eval: split_responses marker parser for on-VM response blocks (plan Task 1).
 - 2026-09-29: docs: add colab-real-loop implementation plan - 14 tasks (split_responses parser, loop module, transport seam, VM phase 2, dashboard/CLI rework, simulation+Nebius deletions, live smoke approval gate).
 - 2026-09-29: spec: colab-real-loop design approved (dashboard config -> Colab T4 attempts -> Token Factory supervisor/judge -> attempt ledger report; simulation + Nebius stubs to be removed; supersedes 2026-09-28 nebius autoheal spec).
 - 2026-09-29: FIRST FULL LIVE COLAB RUN SUCCEEDED (run #4, session st-1790695167): T4 provisioned, LoRA trained 32 steps (loss 1.92->1.32, SuperTaco step/loss lines streamed), lora_adapter zip (6.2 MB, adapter_model.safetensors+tokenizer) downloaded to colab/output/, VM released; run #3 provisioning timed out transiently (colab assign API read timeout) - retry worked.
