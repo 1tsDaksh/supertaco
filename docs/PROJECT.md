@@ -25,6 +25,7 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
 
+- 2026-09-29: colab live run #1 reached real T4 but died in get_peft_model (Colab ships torchao 0.10.0, peft requires >0.16 and raises): ensure_packages now removes stale torchao; adapter error on download-miss now includes the training output tail (exec exits 0 even when a cell raises).
 - 2026-09-29: dashboard: real Colab T4 training panel — supertaco/gpu/colab.py adapter (new->exec->download->stop, streamed loss lines, auth/setup hints, termios shim) + colab/train_lora.py script + AppTests; colab/README rewritten for CLI flow; kaggle/ removed (dropped per user).
 - 2026-09-28: switch free-GPU smoke run to Google Colab (colab/train_lora notebook, T4, loss lines + adapter zip download): Kaggle path blocked at account level (sessions have no internet despite enable_internet=true; diagnosed via diag kernel).
 - 2026-09-28: add free Kaggle GPU smoke-run path: kaggle/train_lora notebook (Qwen2.5-0.5B LoRA on 256 alpaca rows, SuperTaco loss-line format, adapter to /kaggle/working) + push/run docs; kernel zephyr0706/supertaco-lora-smoke-run pushed.

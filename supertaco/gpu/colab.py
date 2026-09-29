@@ -252,6 +252,9 @@ def run_training(
             return TrainingOutcome(
                 False, error=_last_line(lines, f"training script failed (exit {rc})")
             )
+        # `colab exec` exits 0 even when a notebook cell raises (kernel survives),
+        # so remember the training tail: a later download miss needs that context.
+        exec_tail = _last_line(lines, "")
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -266,12 +269,10 @@ def run_training(
         if to or rc != 0 or not artifact.exists():
             if artifact.exists():
                 artifact.unlink()
-            return TrainingOutcome(
-                False,
-                error=_last_line(
-                    lines, f"artifact download failed (exit {rc}) - no {artifact_remote}"
-                ),
-            )
+            err = _last_line(lines, f"artifact download failed (exit {rc}) - no {artifact_remote}")
+            if exec_tail:
+                err = f"{err} (training tail: {exec_tail})"
+            return TrainingOutcome(False, error=err)
         return TrainingOutcome(True, artifact=artifact)
     finally:
         log("[colab] releasing the VM ...")

@@ -17,6 +17,13 @@ def ensure_packages() -> None:
     missing = [p for p in ("peft", "datasets", "accelerate") if importlib.util.find_spec(p) is None]
     if missing:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", *missing])
+    # Colab images ship torchao <0.16 and peft's is_torchao_available() *raises*
+    # (instead of returning False) for too-old versions; the plain Linear LoRA
+    # path we use never needs torchao, so drop it rather than fight the pin.
+    if importlib.util.find_spec("torchao") is not None:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "uninstall", "-y", "-q", "torchao"], check=False
+        )
 
 
 def main() -> None:
