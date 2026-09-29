@@ -768,7 +768,7 @@ git commit -m "feat: run_training_loop happy path + pre-launch model validation"
 ### Task 4: failure → classify → patch → retry + budget (Milestone 1)
 
 **Files:**
-- Modify: `supertaco/loop.py` (no change expected — behavior already coded; tests pin it)
+- Modify: `supertaco/loop.py` (one-char harden `extract_loss_points(result.logs or "")` on the error path — review fix; behavior otherwise already coded)
 - Test: `tests/test_loop.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -841,7 +841,7 @@ If you included the `def attempt_fn` / `...` lines, delete them so the file cont
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest tests/test_loop.py -q`
-Expected: 9 passed.
+Expected: 17 passed (10 pre-existing + 2 plan pins + 5 review-required evidence pins — see plan Task 4 execution record).
 
 - [ ] **Step 5: Commit**
 
