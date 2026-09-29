@@ -25,6 +25,7 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
 
+- 2026-09-28: switch free-GPU smoke run to Google Colab (colab/train_lora notebook, T4, loss lines + adapter zip download): Kaggle path blocked at account level (sessions have no internet despite enable_internet=true; diagnosed via diag kernel).
 - 2026-09-28: add free Kaggle GPU smoke-run path: kaggle/train_lora notebook (Qwen2.5-0.5B LoRA on 256 alpaca rows, SuperTaco loss-line format, adapter to /kaggle/working) + push/run docs; kernel zephyr0706/supertaco-lora-smoke-run pushed.
 - 2026-09-28: fix eval regression signal: handcrafted per-prompt mock answers (base mediocre / healthy expert / unhealthy rambling) replace anemic 2-line templates - real Nemotron judge now separates tiers (healthy ft 9.6 vs base 6.8, flag OFF; unhealthy ft 1.2, flag ON, verified live on Token Factory).
 - 2026-09-28: access: milestone 0 done — jobs list 200 via WSL CLI profile (federation, project-e00w64x9pr00th10a6x8sv); Sky DNS hijack (90.207.238.183) fixed in Windows+WSL hosts; spec §1/§8 updated (real-gpu-autoheal plan Task 1).

@@ -1,5 +1,11 @@
 # Kaggle GPU smoke run (free)
 
+> **Status: blocked.** This account's Kaggle sessions have no outbound
+> internet (the API accepts `enable_internet: true`, but sandbox DNS is
+> blocked — verified with a diagnostic kernel, 2026-09-29). The kernel at
+> `zephyr0706/supertaco-lora-smoke-run` will work as-is if internet is ever
+> enabled on the account. Until then use the Colab path (`colab/README.md`).
+
 One-off LoRA fine-tune on a Kaggle P100 to validate the manual Phase-1
 training loop. The agent/autoheal path stays on Nebius; this is the
 zero-cost way to prove the training config end-to-end and produce a real
