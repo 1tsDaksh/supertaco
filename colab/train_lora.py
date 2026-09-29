@@ -114,6 +114,9 @@ def main() -> None:
         logging_steps=4,
         save_strategy="no",
         report_to=[],
+        # our collator consumes the raw `messages` column (chat template);
+        # the Trainer's signature-based column stripping would remove it
+        remove_unused_columns=False,
     )
 
     trainer = Trainer(
