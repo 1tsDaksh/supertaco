@@ -188,3 +188,48 @@ def test_invalid_model_fails_before_any_attempt():
     assert "T4-viable" in (result.error or "")
     assert transport.calls == []
     assert [e.type for e in events][-1] == "run_failed"
+
+
+# ---------- Task 3 review fixes ----------
+
+
+def test_transport_exception_fails_fast_with_ledger():
+    transport = FakeTransport([make_result(HEALTHY_LOG)], fail_on=[1])
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=on_event,
+    )
+    assert result.success is False
+    assert "transport exploded" in (result.error or "")
+    assert result.attempts == 1
+    assert [e.type for e in events][-1] == "run_failed"
+    assert len(result.attempt_ledger) == 1  # evidence survives fail-fast (fix 3)
+
+
+def test_non_dict_config_never_raises():
+    transport = FakeTransport([make_result(HEALTHY_LOG)])
+    result = run_training_loop(
+        "not-a-dict",
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=lambda ev: None,
+    )
+    assert result.success is False
+    assert "non-empty mapping" in (result.error or "")
+    assert transport.calls == []
+
+
+def test_negative_max_retries_returns_failed_result():
+    transport = FakeTransport([make_result(HEALTHY_LOG)])
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=FakeLLM(),
+        max_retries=-1,
+    )
+    assert result.success is False
+    assert "MaxRetriesExceeded" in (result.error or "")
+    assert result.attempts == 0

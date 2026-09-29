@@ -144,10 +144,18 @@ def run_training_loop(
     from supertaco.eval.harness import DEFAULT_PROMPTS, run_eval_suite, split_responses
     from supertaco.gpu.transport import resolve_model
 
-    llm = llm or make_llm()
     _emit(on_event, "run_started", max_retries=max_retries, mode="colab_t4")
+    llm = llm or make_llm()
 
-    def _failed(attempts, error, failure_key=None, configs=None, ledger=None):
+    def _failed(
+        attempts: int,
+        error: str,
+        failure_key: Optional[str] = None,
+        configs: Optional[list[str]] = None,
+        ledger: Optional[list[AttemptRecord]] = None,
+        eval_results: Optional[dict] = None,
+    ) -> LoopResult:
+        safe_config = dict(config) if isinstance(config, dict) else {}
         _emit(
             on_event,
             "run_failed",
@@ -159,11 +167,12 @@ def run_training_loop(
         return LoopResult(
             False,
             attempts,
-            dict(config),
+            safe_config,
             configs or [],
             failure_key,
             error,
             list(getattr(llm, "call_log", [])),
+            eval_results=eval_results,
             attempt_ledger=ledger or [],
         )
 
@@ -179,6 +188,8 @@ def run_training_loop(
     ledger: list[AttemptRecord] = []
     attempt = 0
     attempt_limit = max_retries + 1
+    failure_key: Optional[str] = None
+    last_eval: Optional[dict] = None
 
     while attempt < attempt_limit:
         attempt += 1
@@ -191,10 +202,26 @@ def run_training_loop(
         try:
             result = transport.run_attempt(current, prompts, on_line=on_line)
         except Exception as exc:  # infra problem: honest failure, no fallback (D9)
-            return _failed(attempt, str(exc), configs=configs_written, ledger=ledger)
+            ledger.append(AttemptRecord(attempt, None, None, [], dict(current)))
+            return _failed(
+                attempt,
+                str(exc),
+                configs=configs_written,
+                ledger=ledger,
+                eval_results=last_eval,
+            )
 
         if result.error:
-            return _failed(attempt, result.error, configs=configs_written, ledger=ledger)
+            ledger.append(
+                AttemptRecord(attempt, None, None, extract_loss_points(result.logs), dict(current))
+            )
+            return _failed(
+                attempt,
+                result.error,
+                configs=configs_written,
+                ledger=ledger,
+                eval_results=last_eval,
+            )
 
         train_logs, responses = split_responses(result.logs)
         points = extract_loss_points(train_logs)
@@ -209,15 +236,28 @@ def run_training_loop(
         failure_key = detect_failure(train_logs)
         if failure_key is None:
             if responses is None:
+                ledger.append(AttemptRecord(attempt, None, None, points, dict(current)))
                 return _failed(
                     attempt,
                     "training produced no ###RESPONSES_JSON### block; cannot evaluate",
                     configs=configs_written,
                     ledger=ledger,
+                    eval_results=last_eval,
                 )
-            eval_results = run_eval_suite(
-                prompts, responses["base"], responses["fine_tuned"], llm=llm
-            )
+            try:
+                eval_results = run_eval_suite(
+                    prompts, responses["base"], responses["fine_tuned"], llm=llm
+                )
+            except KeyError as exc:
+                ledger.append(AttemptRecord(attempt, None, None, points, dict(current)))
+                return _failed(
+                    attempt,
+                    f"responses payload missing prompt key: {exc}",
+                    configs=configs_written,
+                    ledger=ledger,
+                    eval_results=last_eval,
+                )
+            last_eval = eval_results
             if not eval_results["regression_flagged"]:
                 ledger.append(AttemptRecord(attempt, None, None, points, dict(current)))
                 _emit(
@@ -295,4 +335,11 @@ def run_training_loop(
         _emit(on_event, "retry_scheduled", next_attempt=attempt + 1)
 
     error = f"MaxRetriesExceeded: {max_retries} relaunches exhausted"
-    return _failed(attempt, error, failure_key=failure_key, configs=configs_written, ledger=ledger)
+    return _failed(
+        attempt,
+        error,
+        failure_key=failure_key,
+        configs=configs_written,
+        ledger=ledger,
+        eval_results=last_eval,
+    )
