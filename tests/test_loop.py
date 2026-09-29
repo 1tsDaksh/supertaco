@@ -93,6 +93,9 @@ class FakeLLM:
         return "NAN_LOSS"
 
     def propose_patch(self, failure_key, config, logs):
+        self.call_log.append(
+            {"model_key": "patch", "mode": "real", "tokens": 1, "latency": 0.01, "error": None}
+        )
         return {"fix": f"fix-{failure_key}", "reason": "because"}
 
     def _call(self, model_key, prompt, **kw):
@@ -276,6 +279,10 @@ def test_nan_failure_patches_and_heals():
     classified = next(e for e in events if e.type == "classified")
     assert classified.data["mode"] == "real"
     assert classified.data["diverged"] is False
+    assert transport.calls[0]["learning_rate"] == 0.1  # first attempt ran the broken config
+    assert transport.calls[1]["learning_rate"] == 0.01  # relaunch received the PATCHED config
+    assert "patch_proposed" in types  # frozen 10-event catalog includes this
+    assert len(result.attempt_ledger[0].loss_points) == 2  # NAN_LOG has 2 loss lines; D5 evidence
 
 
 def test_budget_exhausted_returns_run_failed_with_ledger():
