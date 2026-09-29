@@ -1,6 +1,7 @@
 """Real training loop: transport seam, events, budget, eval gate."""
 
 import json
+import tempfile
 
 import pytest
 
@@ -9,8 +10,15 @@ from supertaco.eval.harness import RESPONSES_END, RESPONSES_START
 from supertaco.loop import (
     AttemptResult,
     extract_loss_points,
+    run_training_loop,
     validate_config,
 )
+
+
+def _tmp_runs():
+    d = tempfile.mkdtemp(prefix="st_runs_")
+    return d
+
 
 HEALTHY_LOG = (
     "config: {'model': 'Qwen/Qwen2.5-0.5B-Instruct'}\n"
@@ -121,3 +129,62 @@ def test_extract_loss_points_from_real_lines():
 def test_extract_loss_points_preserves_nan():
     pts = extract_loss_points("step 4 loss NaN")
     assert len(pts) == 1 and pts[0] != pts[0]  # NaN
+
+
+# ---------- Task 3: run_training_loop ----------
+
+
+def test_happy_path_first_attempt_success():
+    transport = FakeTransport([lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts))])
+    llm = FakeLLM()
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=llm,
+        on_event=on_event,
+        runs_dir=str(_tmp_runs()),
+    )
+    assert result.success is True
+    assert result.attempts == 1
+    assert result.failure_key is None
+    assert result.eval_results is not None
+    assert result.eval_results["regression_flagged"] is False
+    assert len(result.attempt_ledger) == 1
+    assert result.attempt_ledger[0].failure_key is None
+    types = [e.type for e in events]
+    assert types[0] == "run_started"
+    assert "job_launched" in types and "logs_produced" in types
+    assert types[-1] == "run_succeeded"
+    launch = next(e for e in events if e.type == "job_launched")
+    assert launch.data["payload"]["model"] == "Qwen/Qwen2.5-0.5B-Instruct"
+    assert launch.data["payload"]["config"]["learning_rate"] == 2e-4
+
+
+def test_transport_error_becomes_run_failed_never_raises():
+    transport = FakeTransport([AttemptResult(logs="", error="Colab CLI is not authenticated")])
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=on_event,
+    )
+    assert result.success is False
+    assert "not authenticated" in (result.error or "")
+    assert [e.type for e in events][-1] == "run_failed"
+
+
+def test_invalid_model_fails_before_any_attempt():
+    transport = FakeTransport([make_result(HEALTHY_LOG)])
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "model": "llama-3-8b"},
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=on_event,
+    )
+    assert result.success is False
+    assert "T4-viable" in (result.error or "")
+    assert transport.calls == []
+    assert [e.type for e in events][-1] == "run_failed"
