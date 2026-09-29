@@ -25,6 +25,7 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
 
+- 2026-09-29: spec: colab-real-loop design approved (dashboard config -> Colab T4 attempts -> Token Factory supervisor/judge -> attempt ledger report; simulation + Nebius stubs to be removed; supersedes 2026-09-28 nebius autoheal spec).
 - 2026-09-29: FIRST FULL LIVE COLAB RUN SUCCEEDED (run #4, session st-1790695167): T4 provisioned, LoRA trained 32 steps (loss 1.92->1.32, SuperTaco step/loss lines streamed), lora_adapter zip (6.2 MB, adapter_model.safetensors+tokenizer) downloaded to colab/output/, VM released; run #3 provisioning timed out transiently (colab assign API read timeout) - retry worked.
 - 2026-09-29: colab script fix: remove_unused_columns=False so the chat-template collator keeps the `messages` column (Trainer signature-stripping raised ValueError in run #2); plus torchao fix from run #1.
 - 2026-09-29: colab live run #1 reached real T4 but died in get_peft_model (Colab ships torchao 0.10.0, peft requires >0.16 and raises): ensure_packages now removes stale torchao; adapter error on download-miss now includes the training output tail (exec exits 0 even when a cell raises).
