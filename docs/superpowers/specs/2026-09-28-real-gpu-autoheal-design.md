@@ -22,14 +22,23 @@ actually working no dummy or no fakes".
 
 ### Verified access facts (probes run 2026-09-28)
 
-- `NEBIUS_API_KEY` = an **AI Studio API key** (service account `sa-api-key-aiproject-…`,
-  project `aiproject-e00b52k8gpcc7zs1me`, region `eu-north1`, created 2026-09-23, active).
-  It authenticates against `https://api.nebius.cloud` directly as a Bearer token.
-- **Serverless Jobs API returns `403 PERMISSION_DENIED`** with that key — the service
-  account has model-API rights, not job rights (prerequisite P1).
-- `api.nebius.cloud` is **DNS-poisoned on the user's network**: local router resolves
-  `90.207.238.183` (TCP blackhole); 8.8.8.8/1.1.1.1 resolve `91.210.70.243`, which serves
-  TLS correctly (verified via `curl --resolve`). Only DNS lies (prerequisite P2).
+- **Jobs access (verified 2026-09-28, milestone 0 complete):** the jobs-capable credential is
+  the **user federation profile** (`nebius` CLI profile `default`, Google login, tenant
+  `tenant-e00v26mtwqtan81xc4`, parent project `project-e00w64x9pr00th10a6x8sv` =
+  `default-project-eu-north1`). `nebius ai job list` returns HTTP 200/empty — prerequisite P1
+  satisfied. The `NEBIUS_API_KEY` AI Studio key (SA `sa-api-key-aiproject-…`, project
+  `aiproject-e00b52k8gpcc7zs1me`) still has **no jobs rights** (403) and is NOT used for jobs;
+  it remains the Token Factory/judge credential.
+- **DNS hijack (verified + fixed 2026-09-28):** Sky broadband poisons `*.nebius.cloud` (and
+  `kali.org`) to `90.207.238.183` (Sky block server — proven by apt errors referencing
+  `block.isp.sky.com`). Fix is permanent: entries in Windows `hosts` AND WSL `/etc/hosts`
+  (with `generateHosts = false`) covering `api.`, `api.eu-north1.`, `storage.eu-north1.`,
+  `auth.nebius.com`, `apps.msp.api.`, `cpl.iam.api.` + six more route names (all →
+  `91.210.70.243`). Prerequisite P2 satisfied; preflight (§5.1) re-checks every run.
+- The **CLI-subprocess transport** (`wsl -d kali-linux -- /home/Zephyr/.nebius/bin/nebius …`)
+  is the chosen real-jobs transport (§5.1): only credential path with jobs permission, and its
+  `ai job create/get/get-by-name/logs/cancel` verbs pin the request contract without guessing
+  REST field names.
 
 ## 2. Decisions (clarifiers resolved with user)
 
@@ -231,7 +240,7 @@ in `scripts/live_smoke.py` (approval-gated, never pytest).
 
 | # | Milestone | GPU spend |
 |---|---|---|
-| 0 | **Prerequisites (user)**: jobs-capable credential (403 → 200) + hosts-file DNS entry; I re-probe | none |
+| 0 | **Prerequisites**: ✅ DONE 2026-09-28 — federation profile with jobs 200; Windows+WSL hosts entries (Sky hijack) | none |
 | 1 | Jobs API contract probe → real `NebiusJobClient` + unit tests | none (contract probe may be free GETs) |
 | 2 | Image + recipe → **first live smoke** (tiny train → responses JSON) + capture real-log fixtures | ~1 run |
 | 3 | Real-log detector calibration → **live failure drill** (real OOM/NaN → patch → clean rerun) | ~2 runs |
