@@ -25,6 +25,7 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
 
+- 2026-09-29: loop: module skeleton - Event/LoopResult/AttemptResult, moved validate/_write/extract helpers (plan Task 2).
 - 2026-09-29: eval: split_responses hardening - catch RecursionError, cover non-string payload values (plan Task 1 review fixes).
 - 2026-09-29: eval: split_responses marker parser for on-VM response blocks (plan Task 1).
 - 2026-09-29: docs: add colab-real-loop implementation plan - 14 tasks (split_responses parser, loop module, transport seam, VM phase 2, dashboard/CLI rework, simulation+Nebius deletions, live smoke approval gate).
