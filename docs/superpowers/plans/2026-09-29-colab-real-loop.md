@@ -826,7 +826,7 @@ def test_budget_exhausted_returns_run_failed_with_ledger():
     assert len(result.attempt_ledger) == 3
     assert all(r.failure_key == "NAN_LOSS" for r in result.attempt_ledger)
     assert [e.type for e in events][-1] == "run_failed"
-    assert len(result.configs_written) == 3
+    assert len(result.configs_written) == 2  # patched configs feed RELAUNCHES 2 and 3; attempt 3 breaks before patching (review fix: was == 3)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail/pass**
