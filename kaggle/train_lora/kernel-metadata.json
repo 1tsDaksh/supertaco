@@ -1,5 +1,5 @@
 {
-  "id": "zephyr0706/supertaco-lora-smoke",
+  "id": "zephyr0706/supertaco-lora-smoke-run",
   "title": "SuperTaco LoRA Smoke Run",
   "code_file": "train_lora.ipynb",
   "language": "python",
