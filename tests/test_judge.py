@@ -76,6 +76,16 @@ def test_build_responses_shapes_and_health_dependence():
     assert "uncertain" in ft_b[DEFAULT_PROMPTS[0]]
 
 
+def test_build_responses_answers_are_distinct_and_nonempty():
+    healthy_cfg = {"learning_rate": 0.01}
+    broken_cfg = {"learning_rate": 0.01, "lora_r": 32, "num_epochs": 10}
+    base_h, ft_h = build_responses(healthy_cfg)
+    _, ft_b = build_responses(broken_cfg)
+    for p in DEFAULT_PROMPTS:
+        assert len(base_h[p]) > 40 and len(ft_h[p]) > 40 and len(ft_b[p]) > 40
+        assert len({base_h[p], ft_h[p], ft_b[p]}) == 3
+
+
 def test_run_eval_suite_regression_flag():
     # base always scores 9, fine-tuned always scores 3 -> regression True
     llm = FakeLLM(["9"] * 5 + ["3"] * 5)

@@ -25,6 +25,7 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
 
+- 2026-09-28: fix eval regression signal: handcrafted per-prompt mock answers (base mediocre / healthy expert / unhealthy rambling) replace anemic 2-line templates - real Nemotron judge now separates tiers (healthy ft 9.6 vs base 6.8, flag OFF; unhealthy ft 1.2, flag ON, verified live on Token Factory).
 - 2026-09-28: access: milestone 0 done — jobs list 200 via WSL CLI profile (federation, project-e00w64x9pr00th10a6x8sv); Sky DNS hijack (90.207.238.183) fixed in Windows+WSL hosts; spec §1/§8 updated (real-gpu-autoheal plan Task 1).
 - 2026-09-28: fix eval judge hash-fallback: `max_tokens` 16→512 (Nemotron-3 reasoning ate the whole budget → empty content → unparseable → hash); live suite all `real`, dashboard warning gone.
 - 2026-09-28: fix Token Factory base URL (old host was NXDOMAIN) and real Nemotron model IDs from the TF catalog; live API check verified `mode=real` (230 tokens, verdict OOM).
