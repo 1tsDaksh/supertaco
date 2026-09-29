@@ -25,6 +25,7 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
 
+- 2026-09-29: loop/tests: pin nan-patch-retry + budget ledger, evidence paths, classify mode; harden error-path loss extraction (plan Task 4 + review fixes).
 - 2026-09-29: loop: never-raise guards (non-dict config, negative retries), ledger/eval evidence on fail-fast paths, responses KeyError guard (plan Task 3 review fixes).
 - 2026-09-29: loop: run_training_loop - attempts, events, eval gate, fail-fast infra errors; T4 model whitelist pre-launch (plan Task 3).
 - 2026-09-29: loop: module skeleton - Event/LoopResult/AttemptResult, moved validate/_write/extract helpers (plan Task 2).

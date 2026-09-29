@@ -6,7 +6,7 @@ import tempfile
 import pytest
 
 from supertaco.errors import ConfigurationError
-from supertaco.eval.harness import RESPONSES_END, RESPONSES_START
+from supertaco.eval.harness import DEFAULT_PROMPTS, RESPONSES_END, RESPONSES_START
 from supertaco.loop import (
     AttemptResult,
     extract_loss_points,
@@ -87,6 +87,9 @@ class FakeLLM:
         self._n = 0
 
     def classify_failure(self, logs):
+        self.call_log.append(
+            {"model_key": "classify", "mode": "real", "tokens": 1, "latency": 0.01, "error": None}
+        )
         return "NAN_LOSS"
 
     def propose_patch(self, failure_key, config, logs):
@@ -233,3 +236,165 @@ def test_negative_max_retries_returns_failed_result():
     assert result.success is False
     assert "MaxRetriesExceeded" in (result.error or "")
     assert result.attempts == 0
+
+
+# ---------- Task 4: plan pins ----------
+
+
+def test_nan_failure_patches_and_heals():
+    transport = FakeTransport(
+        [
+            make_result(NAN_LOG),
+            lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts)),
+        ]
+    )
+    llm = FakeLLM()
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 0.1, "batch_size": 8, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=llm,
+        on_event=on_event,
+        runs_dir=str(_tmp_runs()),
+    )
+    assert result.success is True
+    assert result.attempts == 2
+    types = [e.type for e in events]
+    assert (
+        types.index("failure_detected")
+        < types.index("patch_written")
+        < types.index("retry_scheduled")
+    )
+    assert types.count("job_launched") == 2
+    assert result.final_config["learning_rate"] == 0.01  # playbook NAN_LOSS: lr / 10
+    assert len(result.configs_written) == 1
+    rec = result.attempt_ledger[0]
+    assert rec.failure_key == "NAN_LOSS"
+    assert rec.verdict == "NAN_LOSS"
+    assert rec.config_after["learning_rate"] == 0.01
+    # classify-mode pin (review addendum 7 — needs the FakeLLM change):
+    classified = next(e for e in events if e.type == "classified")
+    assert classified.data["mode"] == "real"
+    assert classified.data["diverged"] is False
+
+
+def test_budget_exhausted_returns_run_failed_with_ledger():
+    transport = FakeTransport([make_result(NAN_LOG)])  # always NaN
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 0.1, "batch_size": 8, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=on_event,
+        max_retries=2,
+        runs_dir=str(_tmp_runs()),
+    )
+    assert result.success is False
+    assert "MaxRetriesExceeded" in (result.error or "")
+    assert result.attempts == 3  # initial + 2 relaunches
+    assert len(result.attempt_ledger) == 3
+    assert all(r.failure_key == "NAN_LOSS" for r in result.attempt_ledger)
+    assert [e.type for e in events][-1] == "run_failed"
+    # patched configs feed RELAUNCHES 2 and 3; attempt 3 breaks before patching
+    assert len(result.configs_written) == 2
+
+
+# ---------- Task 4: review-required tests ----------
+
+
+def test_responses_missing_prompt_key_honest_failure():
+    prompts_only_first = {
+        "base": {DEFAULT_PROMPTS[0]: "base answer"},
+        "fine_tuned": {DEFAULT_PROMPTS[0]: "ft answer"},
+    }
+    transport = FakeTransport([make_result(HEALTHY_LOG, prompts_only_first)])
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=on_event,
+    )
+    assert result.success is False
+    assert "missing prompt key" in (result.error or "")
+    assert len(result.attempt_ledger) == 1
+    assert [e.type for e in events][-1] == "run_failed"
+
+
+def test_failed_result_carries_prior_eval_results():
+    transport = FakeTransport(
+        [
+            lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts)),
+            make_result(HEALTHY_LOG),
+        ],
+        fail_on=[2],
+    )
+    result = run_training_loop(
+        {
+            "learning_rate": 2e-4,
+            "lora_r": 8,
+            "lora_alpha": 16,
+            "num_epochs": 3,
+            "model": "qwen2.5-0.5b",
+        },
+        transport=transport,
+        llm=FakeLLM(healthy=False),
+        on_event=lambda ev: None,
+        runs_dir=str(_tmp_runs()),
+    )
+    assert result.success is False
+    assert "transport exploded" in (result.error or "")
+    assert len(result.attempt_ledger) == 2
+    assert result.attempt_ledger[0].failure_key == "EVAL_REGRESSION"
+    assert result.attempt_ledger[1].failure_key is None
+    assert result.eval_results is not None
+    assert result.eval_results["regression_flagged"] is True
+
+
+def test_error_result_captures_partial_log_points():
+    transport = FakeTransport(
+        [AttemptResult(logs="step 4 loss 1.9\ndownload failed", error="download failed")]
+    )
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=lambda ev: None,
+    )
+    assert result.success is False
+    assert len(result.attempt_ledger) == 1
+    assert len(result.attempt_ledger[0].loss_points) == 1
+    assert result.eval_results is None
+
+
+def test_error_result_with_none_logs_never_raises():
+    transport = FakeTransport([AttemptResult(logs=None, error="download failed")])
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=lambda ev: None,
+    )
+    assert result.success is False
+    assert "download failed" in (result.error or "")
+    assert len(result.attempt_ledger) == 1
+
+
+def test_run_started_emitted_before_llm_construction(monkeypatch):
+    events, on_event = collect_events()
+    seen_at_construction: list[str] = []
+
+    class RecordingLLM(FakeLLM):
+        def __init__(self):
+            super().__init__()
+            seen_at_construction.extend(e.type for e in events)
+
+    monkeypatch.setattr("supertaco.loop.make_llm", RecordingLLM)
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "model": "qwen2.5-0.5b"},
+        transport=FakeTransport([make_result(HEALTHY_LOG)]),  # no responses block -> honest failure
+        on_event=on_event,
+    )
+    assert result.success is False
+    assert seen_at_construction, "make_llm must be constructed (proves llm=None path)"
+    assert seen_at_construction[0] == "run_started"

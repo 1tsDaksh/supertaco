@@ -213,7 +213,9 @@ def run_training_loop(
 
         if result.error:
             ledger.append(
-                AttemptRecord(attempt, None, None, extract_loss_points(result.logs), dict(current))
+                AttemptRecord(
+                    attempt, None, None, extract_loss_points(result.logs or ""), dict(current)
+                )
             )
             return _failed(
                 attempt,
