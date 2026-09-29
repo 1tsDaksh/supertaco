@@ -75,6 +75,8 @@ def init_session2():
         "eval_results": None,
         "events": [],
         "run_result": None,
+        "gpu_result": None,
+        "gpu_lines": [],
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -391,6 +393,100 @@ def execute_launch(
     return events, result
 
 
+def _gpu_figure(loss_points: list):
+    """Loss curve for a real Colab run (NaN-safe, same style as dry-run chart)."""
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            y=[None if v != v else v for v in loss_points],
+            mode="lines",
+            name="colab T4",
+        )
+    )
+    fig.update_layout(
+        title="Training loss (Colab T4, real GPU)",
+        xaxis_title="Step",
+        yaxis_title="Loss",
+        height=300,
+    )
+    return fig
+
+
+def render_gpu_panel() -> None:
+    """Free Colab T4 training driven from the dashboard (colab/train_lora.py)."""
+    st.markdown("### 🏋 Real GPU Training (Google Colab, free T4)")
+    st.caption(
+        "Provisions a Colab T4, runs colab/train_lora.py, streams loss lines, "
+        "and pulls back lora_adapter.zip (one-time auth: `colab.exe usage`)."
+    )
+
+    if st.button("🏋 Train on Colab (T4)", use_container_width=True, key="gpu_train_btn"):
+        from supertaco.agent.simlogs import extract_loss_points
+        from supertaco.gpu.colab import run_training
+
+        st.session_state["gpu_result"] = None
+        st.session_state["gpu_lines"] = []
+        live = st.empty()
+        chart = st.empty()
+        loss_points: list[float] = []
+        lines: list[str] = []
+
+        def on_line(ln: str) -> None:
+            lines.append(ln)
+            st.session_state["gpu_lines"] = list(lines)
+            live.markdown(f"`{ln[:200]}`")
+            pts = extract_loss_points(ln)
+            if pts:
+                loss_points.extend(pts)
+                chart.plotly_chart(_gpu_figure(loss_points), width="stretch", key="gpu_live_chart")
+
+        repo = Path(__file__).resolve().parents[2]
+        try:
+            outcome = run_training(
+                repo / "colab" / "train_lora.py",
+                output_dir=repo / "colab" / "output",
+                on_line=on_line,
+            )
+            st.session_state["gpu_result"] = {
+                "success": outcome.success,
+                "error": outcome.error,
+                "artifact": str(outcome.artifact) if outcome.artifact else None,
+                "loss_points": loss_points,
+            }
+        except Exception as exc:  # spec 6: dashboard never shows a traceback
+            st.session_state["gpu_result"] = {
+                "success": False,
+                "error": str(exc),
+                "artifact": None,
+                "loss_points": loss_points,
+            }
+
+    result = st.session_state.get("gpu_result")
+    if result is None:
+        return
+    if result.get("success") and result.get("artifact"):
+        artifact = Path(result["artifact"])
+        st.success(f"✅ Training complete — artifact: {artifact.name}")
+        if artifact.exists():
+            st.download_button(
+                "⬇️ Download lora_adapter.zip",
+                data=artifact.read_bytes(),
+                file_name=artifact.name,
+                mime="application/zip",
+                key="gpu_download_btn",
+            )
+        if result.get("loss_points"):
+            st.plotly_chart(
+                _gpu_figure(result["loss_points"]), width="stretch", key="gpu_final_chart"
+            )
+    else:
+        st.error(f"❌ {result.get('error') or 'Colab run failed'}")
+    lines = st.session_state.get("gpu_lines") or []
+    if lines:
+        with st.expander(f"📜 Colab log ({len(lines)} lines)"):
+            st.code("\n".join(lines[-400:]), language="log")
+
+
 # ─── Main App ─────────────────────────────────────────────────────
 def main():
     init_session2()
@@ -477,6 +573,10 @@ def main():
     # ── Bottom Row: Evaluation ──────────────────────────────────────
     st.markdown("---")
     render_eval_panel()
+
+    # ── Bottom Row: Real GPU training ──────────────────────────────
+    st.markdown("---")
+    render_gpu_panel()
 
 
 if __name__ == "__main__":

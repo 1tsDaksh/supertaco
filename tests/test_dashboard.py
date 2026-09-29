@@ -183,3 +183,44 @@ def test_render_events_shows_run_failed_details():
     assert "configs/runs/demo_patched.yaml" in md
     assert "Gate 1" in md
     assert "attempts 0" in md
+
+
+def test_gpu_panel_renders(app):
+    assert any("Train on Colab" in b.label for b in app.button)
+
+
+def test_gpu_panel_success_shows_download(app, monkeypatch, tmp_path):
+    import supertaco.gpu.colab as colab_mod
+
+    zip_path = tmp_path / "lora_adapter_test.zip"
+    zip_path.write_bytes(b"PK\x03\x04fake")
+
+    def fake_run_training(script, *, output_dir, on_line=None, **kw):
+        on_line("step 4 loss 2.1000")
+        on_line("training finished")
+        return colab_mod.TrainingOutcome(True, artifact=zip_path)
+
+    monkeypatch.setattr(colab_mod, "run_training", fake_run_training)
+    btn = next(b for b in app.button if "Train on Colab" in b.label)
+    btn.click().run()
+    assert not app.exception, [e.value for e in app.exception]
+
+    result = app.session_state["gpu_result"]
+    assert result["success"] is True
+    assert result["loss_points"] == [2.1]
+    assert "step 4 loss 2.1000" in app.session_state["gpu_lines"]
+    assert any("Training complete" in s.value for s in app.success)
+
+
+def test_gpu_panel_error_shown_without_traceback(app, monkeypatch):
+    import supertaco.gpu.colab as colab_mod
+
+    def fake_run_training(script, *, output_dir, on_line=None, **kw):
+        raise colab_mod.ColabError("Colab CLI is not authenticated. Run: colab.exe usage")
+
+    monkeypatch.setattr(colab_mod, "run_training", fake_run_training)
+    btn = next(b for b in app.button if "Train on Colab" in b.label)
+    btn.click().run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert any("not authenticated" in e.value for e in app.error)
+    assert app.session_state["gpu_result"]["success"] is False

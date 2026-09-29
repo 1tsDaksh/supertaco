@@ -27,6 +27,9 @@ logs/*.log
 supertaco/logs/
 supertaco/configs/runs/
 
+# Colab adapter artifacts (pulled back lora_adapter.zip)
+colab/output/
+
 # Configs runs (generated, not committed except examples)
 configs/runs/*
 !configs/runs/*_example.yaml
