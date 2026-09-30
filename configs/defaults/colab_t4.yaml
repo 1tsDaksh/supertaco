@@ -1,0 +1,9 @@
+# Sane default for a free Colab T4 (supervisor loop spec 2026-09-29)
+model: qwen2.5-0.5b
+learning_rate: 0.0002
+batch_size: 4
+lora_r: 8
+lora_alpha: 16
+lora_dropout: 0.05
+num_epochs: 1
+chat_template: llama-3

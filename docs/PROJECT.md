@@ -25,6 +25,7 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
 
+- 2026-09-29: dashboard: single real Colab flow (config+knoobs+model, loop button, attempt-ledger report); colab_t4 default config (plan Task 11).
 - 2026-09-29: playbook: case-insensitive torch-style nan detection + real healthy-log fixture; loop LOSS_RE case-insensitivity (plan Task 10 + booked fixes).
 - 2026-09-29: colab template: model.eval() before eval generation; strengthen phase-2 pins (plan Task 9 review fixes).
 - 2026-09-29: colab template: on-VM base/ft answer generation + RESPONSES_JSON block (plan Task 9).

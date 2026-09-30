@@ -8,7 +8,6 @@ Reads settings directly from .env file without requiring package installation.
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Dict
 
@@ -17,8 +16,7 @@ import streamlit as st
 import yaml
 
 from supertaco.errors import ConfigurationError
-from supertaco.runner import Event, make_llm
-from supertaco.runner import run as runner_run
+from supertaco.loop import Event, extract_loss_points, make_llm, run_training_loop
 
 
 # ─── Load settings directly from .env (no package import needed) ────────────
@@ -71,6 +69,8 @@ def init_session2():
     """Initialise session-state variables if not already set."""
     defaults = {
         "config": {},
+        "cfg_path": "configs/defaults/colab_t4.yaml",
+        "knobs": {},
         "llm_calls": [],
         "eval_results": None,
         "events": [],
@@ -105,15 +105,6 @@ def render_sidebar() -> Dict[str, any]:
     elif calls:
         st.sidebar.success(f"✅ Nemotron: {len(calls)} real call(s)")
 
-    st.sidebar.markdown("### Environment")
-    env = st.sidebar.selectbox(
-        "Environment",
-        ["dev", "prod"],
-        index=0 if _settings.environment != "prod" else 1,
-        help="prod blocks dry-run-only bypasses",
-    )
-    st.session_state["env"] = env
-
     st.sidebar.markdown("### API Keys (from .env)")
     st.sidebar.caption(f"NEBIUS_PROJECT_ID: {_settings.nebius_project_id}")
     st.sidebar.caption("NEBIUS_API_KEY: loaded from .env on import")
@@ -133,81 +124,63 @@ def render_sidebar() -> Dict[str, any]:
     )
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### Quick Start")
-    demo_options = {
-        "Demo: NaN Loss": {
-            "learning_rate": 0.1,
-            "batch_size": 8,
-            "lora_r": 8,
-            "lora_alpha": 16,
-            "num_epochs": 3,
-        },
-        "Demo: OOM": {
-            "learning_rate": 5e-5,
-            "batch_size": 64,
-            "lora_r": 8,
-            "lora_alpha": 16,
-            "num_epochs": 3,
-        },
-        "Demo: Loss Divergence": {
-            "learning_rate": 0.1,
-            "batch_size": 8,
-            "lora_r": 8,
-            "lora_alpha": 16,
-            "num_epochs": 10,
-        },
-        "Demo: Loss Plateau": {
-            "learning_rate": 1e-6,
-            "batch_size": 8,
-            "lora_r": 8,
-            "lora_alpha": 16,
-            "num_epochs": 1,
-        },
-        "Demo: Eval Regression": {
-            "learning_rate": 1e-4,
-            "batch_size": 8,
-            "lora_r": 64,
-            "lora_alpha": 32,
-            "num_epochs": 10,
-        },
-    }
-    selected_demo = st.sidebar.selectbox("Load demo config", list(demo_options.keys()))
-    if st.sidebar.button("Load Demo Config"):
-        demo = demo_options[selected_demo]
-        st.session_state["config"] = demo
-        st.sidebar.success(f"Loaded {selected_demo} config")
-
-    st.sidebar.markdown("### Broken Fixtures")
-    from pathlib import Path as _Path
-
-    runs_dir = _Path(__file__).resolve().parents[2] / "configs" / "runs"
-    fixtures = sorted(p for p in runs_dir.glob("*.yaml") if "_patched" not in p.name)
-    if fixtures:
-        chosen = st.sidebar.selectbox(
-            "Fixture",
-            [f.name for f in fixtures],
-            format_func=lambda n: n.split("_", 2)[-1].rsplit("_", 1)[0],
-        )
-        if st.sidebar.button("Load Fixture"):
-            import yaml as _yaml
-
-            try:
-                cfg = _yaml.safe_load((runs_dir / chosen).read_text(encoding="utf-8-sig"))
-            except _yaml.YAMLError as exc:
-                st.sidebar.error(f"Could not parse {chosen}: {exc}")
+    st.sidebar.markdown("### Training Config")
+    repo = Path(__file__).resolve().parents[2]
+    cfg_path = st.sidebar.text_input(
+        "Config YAML path", value=st.session_state.get("cfg_path", "configs/defaults/colab_t4.yaml")
+    )
+    st.session_state["cfg_path"] = cfg_path
+    if st.sidebar.button("Load config"):
+        target = Path(cfg_path) if Path(cfg_path).is_absolute() else repo / cfg_path
+        try:
+            loaded = yaml.safe_load(target.read_text(encoding="utf-8-sig"))
+        except Exception as exc:
+            st.sidebar.error(f"Could not load {cfg_path}: {exc}")
+        else:
+            if not isinstance(loaded, dict):
+                st.sidebar.error(f"{cfg_path} is not a config mapping")
             else:
-                if not isinstance(cfg, dict):
-                    st.sidebar.error(f"{chosen} is not a config mapping")
-                else:
-                    st.session_state["config"] = cfg
-                    st.sidebar.success(f"Loaded {chosen}")
+                st.session_state["config"] = loaded
+                st.sidebar.success(f"Loaded {cfg_path}")
+
+    from supertaco.gpu.transport import MODEL_WHITELIST
+
+    st.sidebar.markdown("### Model (T4-viable)")
+    # Plan 3c adjustment: surface a non-whitelist configured model instead of replacing it.
+    options = list(MODEL_WHITELIST)
+    current_model = (st.session_state.get("config") or {}).get("model")
+    if isinstance(current_model, str) and current_model and current_model not in options:
+        options.append(current_model)
+    st.session_state["model_sel"] = st.sidebar.selectbox(
+        "model",
+        options,
+        index=options.index(current_model) if current_model in options else 0,
+        help="Whitelisted HF models that fit a free T4",
+    )
+    st.sidebar.markdown("### Hyperparameters")
+    knobs = st.session_state.setdefault("knobs", {})
+    knobs["learning_rate"] = st.sidebar.number_input(
+        "learning_rate", value=float(knobs.get("learning_rate", 2e-4)), format="%.6f"
+    )
+    knobs["batch_size"] = st.sidebar.number_input(
+        "batch_size", min_value=1, max_value=64, value=int(knobs.get("batch_size", 4))
+    )
+    knobs["lora_r"] = st.sidebar.number_input(
+        "lora_r", min_value=4, max_value=64, value=int(knobs.get("lora_r", 8))
+    )
+    knobs["lora_alpha"] = st.sidebar.number_input(
+        "lora_alpha", min_value=4, max_value=128, value=int(knobs.get("lora_alpha", 16))
+    )
+    knobs["num_epochs"] = st.sidebar.number_input(
+        "num_epochs", min_value=1, max_value=10, value=int(knobs.get("num_epochs", 1))
+    )
 
     st.sidebar.markdown("---")
     if st.sidebar.button("🔄 Reset Session", use_container_width=True):
         reset_session2()
         st.rerun()
 
-    return {"settings": _settings, "env": env}
+    return {"settings": _settings}
 
 
 def render_config_editor(config: dict) -> dict:
@@ -229,76 +202,105 @@ def render_config_editor(config: dict) -> dict:
     return parsed
 
 
-def render_eval_panel() -> None:
-    """Before/after eval over the fixed 5-prompt suite (real judge)."""
-    st.markdown("### 📊 Before / After Evaluation")
+def render_report() -> None:
+    """Full attempt ledger + judge table + final config + artifact (spec D5)."""
+    st.markdown("### 📋 Training Report")
     result = st.session_state.get("run_result")
-    if result is None or not result.success:
-        st.info("Run a job to completion first — eval needs a final config.")
+    if result is None:
+        st.info("Run the supervisor loop to see attempts, judge scores and config changes.")
         return
 
-    if st.button(
-        "🧪 Run Eval Suite (5 prompts, real Nemotron judge)",
-        use_container_width=True,
-        key="eval_suite_btn",
-    ):
-        from supertaco.eval.harness import DEFAULT_PROMPTS, build_responses, run_eval_suite
-
-        with st.spinner("Scoring with Nemotron judge..."):
-            base_responses, ft_responses = build_responses(result.final_config)
-            eval_llm = make_llm()  # fresh client -> fresh circuit breaker
-            suite_results = run_eval_suite(
-                DEFAULT_PROMPTS, base_responses, ft_responses, llm=eval_llm
-            )
-            st.session_state["eval_results"] = suite_results
-
-    results = st.session_state.get("eval_results")
-    if not results:
-        return
-
-    base_avg = sum(results["base_scores"]) / len(results["base_scores"])
-    ft_avg = sum(results["fine_tuned_scores"]) / len(results["fine_tuned_scores"])
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Before (base)", f"{base_avg:.2f}")
-    col2.metric("After (fine-tuned)", f"{ft_avg:.2f}")
-    col3.metric("Improvement", f"{ft_avg - base_avg:+.2f}")
-    if results["regression_flagged"]:
-        st.error("🚨 EVAL REGRESSION: fine-tuned is >10% below baseline.")
-    if any("hash" in m for m in results["modes"]):
-        st.warning(
-            "⚠ Judge fell back to hash mode (LLM unavailable) — "
-            "scores are deterministic placeholders."
+    if result.attempt_ledger:
+        st.markdown(
+            f"**Attempts used:** {result.attempts} — "
+            + ("✅ passed the judge" if result.success else f"❌ {result.error}")
         )
-    st.dataframe(
-        {
-            "prompt": results["prompts"],
-            "base": results["base_scores"],
-            "fine_tuned": results["fine_tuned_scores"],
-            "judge": results["modes"],
-        },
-        use_container_width=True,
-        hide_index=True,
-    )
+        rows: dict[str, list] = {
+            "attempt": [],
+            "failure": [],
+            "verdict": [],
+            "config changes": [],
+            "loss points": [],
+        }
+        for rec in result.attempt_ledger:
+            rows["attempt"].append(rec.attempt)
+            rows["failure"].append(rec.failure_key or "—")
+            rows["verdict"].append(rec.verdict or "—")
+            if rec.config_after:
+                changed = ", ".join(
+                    f"{k}: {rec.config_before.get(k)!r}->{rec.config_after[k]!r}"
+                    for k in rec.config_after
+                    if rec.config_before.get(k) != rec.config_after[k]
+                )
+            else:
+                changed = "—"
+            rows["config changes"].append(changed)
+            rows["loss points"].append(len(rec.loss_points))
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    results = result.eval_results
+    if not results:
+        st.caption("No judge evaluation — the run never reached a healthy attempt.")
+    else:
+        base_avg = sum(results["base_scores"]) / len(results["base_scores"])
+        ft_avg = sum(results["fine_tuned_scores"]) / len(results["fine_tuned_scores"])
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Judge: base", f"{base_avg:.2f}")
+        col2.metric("Judge: fine-tuned", f"{ft_avg:.2f}")
+        col3.metric("Improvement", f"{ft_avg - base_avg:+.2f}")
+        if results["regression_flagged"]:
+            st.error("🚨 EVAL REGRESSION: fine-tuned is >10% below baseline.")
+        else:
+            st.caption("✅ Regression check passed (fine-tuned ≥ 90% of base).")
+        if any("hash" in m for m in results["modes"]):
+            st.warning(
+                "⚠ Judge fell back to hash mode (LLM unavailable) — "
+                "scores are deterministic placeholders."
+            )
+        st.dataframe(
+            {
+                "prompt": results["prompts"],
+                "base": results["base_scores"],
+                "fine_tuned": results["fine_tuned_scores"],
+                "judge": results["modes"],
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    if result.success:
+        st.markdown("**Final config**")
+        st.code(yaml.dump(result.final_config, sort_keys=True), language="yaml")
+        if result.artifact and Path(result.artifact).exists():
+            artifact = Path(result.artifact)
+            st.download_button(
+                f"⬇️ Download {artifact.name}",
+                data=artifact.read_bytes(),
+                file_name=artifact.name,
+                mime="application/zip",
+                key="report_download_btn",
+            )
 
 
 def _render_events(events: list) -> str:
     """Build the full timeline markdown from collected events."""
     if not events:
-        return "No decisions yet — launch a job to see the loop."
+        return "No decisions yet - launch a job to see the loop."
     lines = []
     for ev in events:
         d = ev.data
         if ev.type == "job_launched":
+            payload = d.get("payload", {})
             lines.append(
-                f"**Attempt {d['attempt']}** · 🚀 dry-run launch "
-                f"({len(d['payload'].get('config', {}))} config keys)"
+                f"**Attempt {d['attempt']}** · 🚀 launch `{payload.get('model', '?')}` on T4 "
+                f"({len(payload.get('config', {}))} config keys)"
             )
         elif ev.type == "failure_detected":
             lines.append(f"**Attempt {d['attempt']}** · ❌ detected `{d['failure_key']}`")
         elif ev.type == "classified":
             mark = "⚠️ diverges from playbook" if d["diverged"] else "agrees with playbook"
             lines.append(
-                f"**Attempt {d['attempt']}** · 🤖 Nemotron nano → "
+                f"**Attempt {d['attempt']}** · 🤖 Nemotron → "
                 f"`{d['nemotron_verdict']}` ({d['mode']}, {mark})"
             )
         elif ev.type == "patch_proposed":
@@ -311,9 +313,7 @@ def _render_events(events: list) -> str:
         elif ev.type == "patch_written":
             before, after = d.get("before", {}), d.get("after", {})
             changed = ", ".join(
-                f"{k}: {before.get(k)!r}→{after[k]!r}"
-                for k in after
-                if before.get(k) != after.get(k)
+                f"{k}: {before.get(k)!r}->{after[k]!r}" for k in after if before.get(k) != after[k]
             )
             lines.append(
                 f"**Attempt {d['attempt']}** · 💾 patched `{d['failure_key']}` → "
@@ -364,16 +364,22 @@ def _llm_rows(calls: list) -> list:
     ]
 
 
-def execute_launch(
-    config: dict,
-    max_retries: int,
-    timeline_slot,
-    logs_slot,
-    chart_slot,
-    dry_run: bool = True,
-):
-    """Run the pipeline, streaming events into the status placeholders."""
+def execute_launch(config, max_retries, timeline_slot, logs_slot, chart_slot):
+    """Run the real loop, streaming events + live loss into the placeholders."""
+    from supertaco.gpu.transport import ColabTransport
+
     events: list[Event] = []
+    live_points: list[float] = []
+
+    def on_line(ln: str) -> None:
+        logs_slot.code(ln[-500:], language="log")
+        pts = extract_loss_points(ln)
+        if pts:
+            live_points.extend(p for p in pts if p == p)
+            if live_points:
+                chart_slot.plotly_chart(
+                    _gpu_figure(live_points), width="stretch", key="live_loss_chart"
+                )
 
     def on_event(ev: Event) -> None:
         events.append(ev)
@@ -383,12 +389,14 @@ def execute_launch(
             logs_slot.code(ev.data["text"], language="log")
             chart_slot.plotly_chart(_loss_figure(events), use_container_width=True)
 
-    result = runner_run(
+    result = run_training_loop(
         config,
-        max_retries=max_retries,
+        transport=ColabTransport(),
         on_event=on_event,
+        on_line=on_line,
         llm=make_llm(),
-        dry_run=dry_run,
+        max_retries=max_retries,
+        runs_dir="configs/runs",
     )
     return events, result
 
@@ -412,81 +420,6 @@ def _gpu_figure(loss_points: list):
     return fig
 
 
-def render_gpu_panel() -> None:
-    """Free Colab T4 training driven from the dashboard (colab/train_lora.py)."""
-    st.markdown("### 🏋 Real GPU Training (Google Colab, free T4)")
-    st.caption(
-        "Provisions a Colab T4, runs colab/train_lora.py, streams loss lines, "
-        "and pulls back lora_adapter.zip (one-time auth: `colab.exe usage`)."
-    )
-
-    if st.button("🏋 Train on Colab (T4)", use_container_width=True, key="gpu_train_btn"):
-        from supertaco.agent.simlogs import extract_loss_points
-        from supertaco.gpu.colab import run_training
-
-        st.session_state["gpu_result"] = None
-        st.session_state["gpu_lines"] = []
-        live = st.empty()
-        chart = st.empty()
-        loss_points: list[float] = []
-        lines: list[str] = []
-
-        def on_line(ln: str) -> None:
-            lines.append(ln)
-            st.session_state["gpu_lines"] = list(lines)
-            live.markdown(f"`{ln[:200]}`")
-            pts = extract_loss_points(ln)
-            if pts:
-                loss_points.extend(pts)
-                chart.plotly_chart(_gpu_figure(loss_points), width="stretch", key="gpu_live_chart")
-
-        repo = Path(__file__).resolve().parents[2]
-        try:
-            outcome = run_training(
-                repo / "colab" / "train_lora.py",
-                output_dir=repo / "colab" / "output",
-                on_line=on_line,
-            )
-            st.session_state["gpu_result"] = {
-                "success": outcome.success,
-                "error": outcome.error,
-                "artifact": str(outcome.artifact) if outcome.artifact else None,
-                "loss_points": loss_points,
-            }
-        except Exception as exc:  # spec 6: dashboard never shows a traceback
-            st.session_state["gpu_result"] = {
-                "success": False,
-                "error": str(exc),
-                "artifact": None,
-                "loss_points": loss_points,
-            }
-
-    result = st.session_state.get("gpu_result")
-    if result is None:
-        return
-    if result.get("success") and result.get("artifact"):
-        artifact = Path(result["artifact"])
-        st.success(f"✅ Training complete — artifact: {artifact.name}")
-        if artifact.exists():
-            st.download_button(
-                "⬇️ Download lora_adapter.zip",
-                data=artifact.read_bytes(),
-                file_name=artifact.name,
-                mime="application/zip",
-                key="gpu_download_btn",
-            )
-        if result.get("loss_points"):
-            st.plotly_chart(
-                _gpu_figure(result["loss_points"]), width="stretch", key="gpu_final_chart"
-            )
-    else:
-        st.error(f"❌ {result.get('error') or 'Colab run failed'}")
-    lines = st.session_state.get("gpu_lines") or []
-    if lines:
-        with st.expander(f"📜 Colab log ({len(lines)} lines)"):
-            st.code("\n".join(lines[-400:]), language="log")
-
-
 # ─── Main App ─────────────────────────────────────────────────────
 def main():
     init_session2()
@@ -500,19 +433,16 @@ def main():
 
     # ── Left Column: Job Launcher ──────────────────────────────────
     with st.container(border=True):
-        st.markdown("### 🚦 Launch Job")
+        st.markdown("### 🚦 Fine-tune on Colab")
         cfg = render_config_editor(st.session_state["config"])
-
-        c1, c2 = st.columns(2)
-        with c1:
-            dry_run_on = st.checkbox(
-                "Dry-run (Nebius GPU jobs stay dry-run until Gate 1)", value=True
-            )
-        with c2:
-            st.text_input("Job label", value=f"run-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}")
-
-        run_clicked = st.button("▶ Launch Job", type="primary", use_container_width=True)
-        cfg_for_run = cfg
+        knobs = st.session_state.get("knobs") or {}
+        model_sel = st.session_state.get("model_sel")
+        cfg_for_run = {**cfg, **knobs}
+        if model_sel:
+            cfg_for_run["model"] = model_sel
+        run_clicked = st.button(
+            "🚀 Fine-tune on Colab (supervisor loop)", type="primary", use_container_width=True
+        )
 
     # ── Right Column: Monitor & Metrics ────────────────────────────
     with st.container(border=True):
@@ -533,7 +463,6 @@ def main():
                     timeline_slot,
                     logs_slot,
                     chart_slot,
-                    dry_run=dry_run_on,
                 )
                 st.session_state["events"] = events
                 st.session_state["run_result"] = result
@@ -541,7 +470,7 @@ def main():
                 if not result.success:
                     st.error(f"🛑 {result.error}")
                 else:
-                    st.toast("✅ Run healed", icon="✅")
+                    st.toast("✅ Run complete", icon="✅")
             except ConfigurationError as exc:
                 st.error(f"❌ {exc}")
                 timeline_slot.markdown(_render_events(st.session_state.get("events", [])))
@@ -570,13 +499,9 @@ def main():
             with st.expander(f"🧠 LLM Calls ({len(calls)})"):
                 st.dataframe(_llm_rows(calls), use_container_width=True, hide_index=True)
 
-    # ── Bottom Row: Evaluation ──────────────────────────────────────
+    # ── Bottom Row: Training report ────────────────────────────────
     st.markdown("---")
-    render_eval_panel()
-
-    # ── Bottom Row: Real GPU training ──────────────────────────────
-    st.markdown("---")
-    render_gpu_panel()
+    render_report()
 
 
 if __name__ == "__main__":
