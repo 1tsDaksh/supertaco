@@ -25,6 +25,7 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
 
+- 2026-09-29: cli: pin transport kwarg + non-mapping config exit (plan Task 12 review fixes).
 - 2026-09-29: cli: run executes the real supervisor loop; --dry-run removed (plan Task 12).
 - 2026-09-29: dashboard: fix live-chart duplicate-key crash, pin streaming/report/knobs semantics (plan Task 11 review fixes).
 - 2026-09-29: dashboard: single real Colab flow (config+knoobs+model, loop button, attempt-ledger report); colab_t4 default config (plan Task 11).

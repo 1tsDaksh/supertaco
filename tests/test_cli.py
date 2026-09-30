@@ -117,3 +117,22 @@ def test_dry_run_flag_is_gone(capsys):
         cli.main(["run", "x.yaml", "--dry-run"])
     assert exc.value.code == 2
     assert "unrecognized arguments" in capsys.readouterr().err
+
+
+def test_transport_kwarg_used_directly(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    transport = FakeTransport()
+    cli.run_config(str(_write_cfg(tmp_path)), llm=FakeLLM(), transport=transport)
+    assert transport.calls == 1
+    assert "Success after 1 attempt(s)" in capsys.readouterr().out
+
+
+def test_non_mapping_config_exits_one(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_make_transport", lambda: FakeTransport())
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("- 1\n- 2\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        cli.run_config(str(bad), llm=FakeLLM())
+    assert exc.value.code == 1
+    assert "mapping" in capsys.readouterr().out
