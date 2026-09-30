@@ -102,6 +102,7 @@ def test_transport_renders_and_calls_adapter(tmp_path, monkeypatch):
     assert res.error is None
     assert res.artifact == tmp_path / "a.zip"
     assert "step 4 loss 1.9218" in res.logs
+    assert captured["output_dir"] == tmp_path / "out"
     rendered = captured["script"].read_text(encoding="utf-8")
     assert "'model': 'Qwen/Qwen2.5-0.5B-Instruct'" in rendered
     assert "EVAL_PROMPTS = ['p1', 'p2']" in rendered

@@ -98,6 +98,9 @@ def test_exec_failure_reports_error_and_still_stops(fake_cli, tmp_path, monkeypa
 
     assert not outcome.success and outcome.artifact is None
     assert "boom" in outcome.error
+    assert outcome.logs
+    assert any("boom: RuntimeError in cell" in ln for ln in outcome.logs)
+    assert any("step 4 loss 2.1000" in ln for ln in outcome.logs)
     calls = [ln.split()[0] for ln in log.read_text(encoding="utf-8").splitlines()]
     assert calls == ["new", "exec", "stop"]
 
@@ -119,6 +122,9 @@ def test_download_failure_reports_error_and_still_stops(fake_cli, tmp_path, monk
 
     assert not outcome.success and outcome.artifact is None
     assert "download" in outcome.error
+    assert outcome.logs
+    assert any("download failed: no such file" in ln for ln in outcome.logs)
+    assert any("training finished" in ln for ln in outcome.logs)
     calls = [ln.split()[0] for ln in log.read_text(encoding="utf-8").splitlines()]
     assert calls == ["new", "exec", "download", "stop"]
 
@@ -178,3 +184,5 @@ def test_outcome_carries_collected_logs(fake_cli, tmp_path):
     )
     assert outcome.success is True
     assert any("step 4 loss" in ln for ln in outcome.logs)
+    assert any("session assigned" in ln for ln in outcome.logs)
+    assert any("downloaded" in ln for ln in outcome.logs)

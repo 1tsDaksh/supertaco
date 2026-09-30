@@ -25,6 +25,7 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
 
+- 2026-09-29: tests: pin failure-path and per-stream log passthrough in adapter (plan Task 8 review fixes).
 - 2026-09-29: transport: ColabTransport (render -> run_training -> AttemptResult) + adapter log passthrough (plan Task 8).
 - 2026-09-29: transport: reject config/prompt values containing template markers; pin rendered-script validity (plan Task 7 review fixes).
 - 2026-09-29: transport: marker regions in colab template + deterministic render_script (plan Task 7).
