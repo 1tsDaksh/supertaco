@@ -129,5 +129,9 @@ def test_template_contains_phase2_generation_and_block(tmp_path):
     assert 'json.dumps({"base"' in text
     assert "max_new_tokens=150" in text
     assert "do_sample=False" in text
+    assert "model.eval()" in text
     # responses block must land in exec-stream logs before the zip step (split_responses reads logs)
     assert text.index("###RESPONSES_JSON###") < text.index("shutil.make_archive")
+    assert text.index("with model.disable_adapter():") < text.index("base_answers[p] = _gen(t)")
+    assert '"base": base_answers' in text
+    assert '"fine_tuned": ft_answers' in text

@@ -141,6 +141,8 @@ def main() -> None:
     trainer.train()
     print("training finished", flush=True)
 
+    model.eval()
+
     # ---- phase 2: base vs fine-tuned answers for the judge ----
     print("phase 2: generating eval answers", flush=True)
     chat_inputs = [
