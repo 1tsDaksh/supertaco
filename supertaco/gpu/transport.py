@@ -6,8 +6,10 @@ import pprint
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Callable, Optional
 
 from supertaco.errors import ConfigurationError
+from supertaco.loop import AttemptResult
 
 MODEL_WHITELIST: dict[str, str] = {
     "qwen2.5-0.5b": "Qwen/Qwen2.5-0.5B-Instruct",
@@ -67,3 +69,27 @@ def render_script(config: dict, prompts: list[str], template: Path, out_dir: Pat
     path = out_dir / f"attempt_{stamp}.py"
     path.write_text(text, encoding="utf-8")
     return path
+
+
+class ColabTransport:
+    """One attempt = fresh T4 VM: render -> train+generate -> download -> stop."""
+
+    def __init__(self, script_template: Optional[Path] = None, output_dir: Optional[Path] = None):
+        repo = Path(__file__).resolve().parents[2]
+        self.script_template = script_template or repo / "colab" / "train_lora.py"
+        self.output_dir = output_dir or repo / "colab" / "output"
+        self.render_dir = repo / "configs" / "runs"
+
+    def run_attempt(
+        self, config: dict, prompts: list[str], on_line: Optional[Callable[[str], None]] = None
+    ) -> AttemptResult:
+        from supertaco.gpu.colab import run_training
+
+        resolved = {**config, "model": resolve_model(config.get("model"))}
+        script = render_script(resolved, prompts, self.script_template, self.render_dir)
+        outcome = run_training(script, output_dir=self.output_dir, on_line=on_line)
+        return AttemptResult(
+            logs="\n".join(outcome.logs),
+            artifact=outcome.artifact,
+            error=outcome.error if not outcome.success else None,
+        )

@@ -162,3 +162,19 @@ def test_missing_script_raises(tmp_path, fake_cli):
             output_dir=tmp_path / "out",
             provision_deadline_s=30,
         )
+
+
+def test_outcome_carries_collected_logs(fake_cli, tmp_path):
+    cli, _log = fake_cli
+    script = tmp_path / "t.py"
+    script.write_text("print('x')", encoding="utf-8")
+    outcome = run_training(
+        script,
+        cli=cli,
+        output_dir=tmp_path / "out",
+        provision_deadline_s=30,
+        exec_deadline_s=30,
+        download_deadline_s=30,
+    )
+    assert outcome.success is True
+    assert any("step 4 loss" in ln for ln in outcome.logs)

@@ -17,7 +17,7 @@ import queue
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional, Sequence, Union
 
@@ -87,6 +87,7 @@ class TrainingOutcome:
     artifact: Optional[Path] = None
     error: Optional[str] = None
     timed_out: bool = False
+    logs: list = field(default_factory=list)
 
 
 CliArg = Union[str, Sequence[str], None]
@@ -217,16 +218,23 @@ def run_training(
     session = session or f"st-{int(time.time())}"
     log = on_line or (lambda _ln: None)
     artifact: Optional[Path] = None
+    all_lines: list[str] = []
 
     log(f"[colab] provisioning {gpu} session '{session}' ...")
     rc, to, lines = _stream(
         base, ["new", "-s", session, "--gpu", gpu], on_line, deadline_s=provision_deadline_s
     )
+    all_lines.extend(lines)
     if to:
-        _stream(base, ["stop", "-s", session], on_line, deadline_s=120)
-        return TrainingOutcome(False, error="timed out provisioning the GPU session")
+        _, _, stop_lines = _stream(base, ["stop", "-s", session], on_line, deadline_s=120)
+        all_lines.extend(stop_lines)
+        return TrainingOutcome(
+            False, error="timed out provisioning the GPU session", logs=list(all_lines)
+        )
     if rc != 0:
-        return TrainingOutcome(False, error=_last_line(lines, f"colab new failed (exit {rc})"))
+        return TrainingOutcome(
+            False, error=_last_line(lines, f"colab new failed (exit {rc})"), logs=list(all_lines)
+        )
 
     try:
         log("[colab] executing training script on the VM ...")
@@ -244,13 +252,18 @@ def run_training(
             on_line,
             deadline_s=exec_deadline_s,
         )
+        all_lines.extend(lines)
         if to:
             return TrainingOutcome(
-                False, error=f"training exceeded {int(exec_deadline_s)}s and was stopped"
+                False,
+                error=f"training exceeded {int(exec_deadline_s)}s and was stopped",
+                logs=list(all_lines),
             )
         if rc != 0:
             return TrainingOutcome(
-                False, error=_last_line(lines, f"training script failed (exit {rc})")
+                False,
+                error=_last_line(lines, f"training script failed (exit {rc})"),
+                logs=list(all_lines),
             )
         # `colab exec` exits 0 even when a notebook cell raises (kernel survives),
         # so remember the training tail: a later download miss needs that context.
@@ -266,17 +279,19 @@ def run_training(
             on_line,
             deadline_s=download_deadline_s,
         )
+        all_lines.extend(lines)
         if to or rc != 0 or not artifact.exists():
             if artifact.exists():
                 artifact.unlink()
             err = _last_line(lines, f"artifact download failed (exit {rc}) - no {artifact_remote}")
             if exec_tail:
                 err = f"{err} (training tail: {exec_tail})"
-            return TrainingOutcome(False, error=err)
-        return TrainingOutcome(True, artifact=artifact)
+            return TrainingOutcome(False, error=err, logs=list(all_lines))
+        return TrainingOutcome(True, artifact=artifact, logs=list(all_lines))
     finally:
         log("[colab] releasing the VM ...")
         try:
-            _stream(base, ["stop", "-s", session], on_line, deadline_s=120)
+            _, _, stop_lines = _stream(base, ["stop", "-s", session], on_line, deadline_s=120)
+            all_lines.extend(stop_lines)
         except ColabError:
             pass  # teardown is best-effort; backend reclaims idle VMs anyway
