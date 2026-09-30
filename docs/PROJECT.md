@@ -25,6 +25,8 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
 
+- 2026-09-29: cleanup: delete simulated runner, Nebius stubs, broken fixtures; harness loses build_responses (plan Task 13).
+- 2026-09-29: Task 13 gate notes: pre-existing `ruff format` findings left unfixed (rule 5) — supertaco/errors.py + 4 docs .md files (2026-09-24-functional-dashboard, 2026-09-28-real-gpu-autoheal, 2026-09-29-colab-real-loop plans, 2026-09-29-colab-real-loop-design spec); `scripts/` dir removed with make_broken_configs.py, so the format gate now runs as `ruff format --check supertaco tests`.
 - 2026-09-29: cli: pin transport kwarg + non-mapping config exit (plan Task 12 review fixes).
 - 2026-09-29: cli: run executes the real supervisor loop; --dry-run removed (plan Task 12).
 - 2026-09-29: dashboard: fix live-chart duplicate-key crash, pin streaming/report/knobs semantics (plan Task 11 review fixes).

@@ -1,6 +1,6 @@
 """Real judge scoring with hash fallback, clamping, and suite regression flag."""
 
-from supertaco.eval.harness import DEFAULT_PROMPTS, build_responses, run_eval_suite
+from supertaco.eval.harness import DEFAULT_PROMPTS, run_eval_suite
 from supertaco.eval.judges import JudgeResult, score_response
 
 
@@ -59,37 +59,11 @@ def test_judge_requests_enough_tokens_for_reasoning_model():
     assert seen["max_tokens"] >= 256
 
 
-def test_build_responses_shapes_and_health_dependence():
-    healthy = {
-        "learning_rate": 2e-5,
-        "batch_size": 8,
-        "lora_r": 8,
-        "lora_alpha": 16,
-        "num_epochs": 3,
-    }
-    broken = {"learning_rate": 0.1, "batch_size": 8, "lora_r": 8, "lora_alpha": 16, "num_epochs": 3}
-    base_h, ft_h = build_responses(healthy)
-    base_b, ft_b = build_responses(broken)
-    assert len(base_h) == len(DEFAULT_PROMPTS) == 5
-    assert ft_h[DEFAULT_PROMPTS[0]] != ft_b[DEFAULT_PROMPTS[0]]
-    assert "structured" in ft_h[DEFAULT_PROMPTS[0]].lower() or "1)" in ft_h[DEFAULT_PROMPTS[0]]
-    assert "uncertain" in ft_b[DEFAULT_PROMPTS[0]]
-
-
-def test_build_responses_answers_are_distinct_and_nonempty():
-    healthy_cfg = {"learning_rate": 0.01}
-    broken_cfg = {"learning_rate": 0.01, "lora_r": 32, "num_epochs": 10}
-    base_h, ft_h = build_responses(healthy_cfg)
-    _, ft_b = build_responses(broken_cfg)
-    for p in DEFAULT_PROMPTS:
-        assert len(base_h[p]) > 40 and len(ft_h[p]) > 40 and len(ft_b[p]) > 40
-        assert len({base_h[p], ft_h[p], ft_b[p]}) == 3
-
-
 def test_run_eval_suite_regression_flag():
     # base always scores 9, fine-tuned always scores 3 -> regression True
     llm = FakeLLM(["9"] * 5 + ["3"] * 5)
-    base, ft = build_responses({"learning_rate": 2e-5, "batch_size": 8})
+    base = {p: f"base answer to {p}" for p in DEFAULT_PROMPTS}
+    ft = {p: f"ft answer to {p}" for p in DEFAULT_PROMPTS}
     results = run_eval_suite(DEFAULT_PROMPTS, base, ft, llm=llm)
     assert len(results["base_scores"]) == 5
     assert results["regression_flagged"] is True
@@ -114,7 +88,8 @@ def test_suite_caps_at_five_prompts():
 
 
 def test_suite_without_llm_reports_hash_modes():
-    base, ft = build_responses({"learning_rate": 2e-5, "batch_size": 8})
+    base = {p: f"base answer to {p}" for p in DEFAULT_PROMPTS}
+    ft = {p: f"ft answer to {p}" for p in DEFAULT_PROMPTS}
     results = run_eval_suite(DEFAULT_PROMPTS, base, ft, llm=None)
     assert all(m == "base:hash / ft:hash" for m in results["modes"])
     assert results["regression_flagged"] is False
