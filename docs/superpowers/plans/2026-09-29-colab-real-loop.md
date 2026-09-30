@@ -1455,6 +1455,12 @@ git add supertaco/agent/playbook.py tests/test_playbook.py tests/fixtures/real_c
 git commit -m "feat: playbook detects torch-style lowercase nan; pin real healthy Colab log"
 ```
 
+**Execution note (booked review fixes, landed in commit `4d9144a`):** Task 10 also included
+(a) `re.I` on `loop.py` `LOSS_RE` (real torch logs print lowercase `loss nan`; ledger NaN points
+were dropped) + `test_extract_loss_points_preserves_lowercase_nan`; (b) fixture includes the
+`phase 2: generating eval answers` line (block stripped) so healthy phase-2 output is pinned as
+non-false-positive.
+
 ---
 
 ### Task 11: Dashboard rework (Milestone 4)
