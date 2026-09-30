@@ -508,3 +508,54 @@ def test_log_failure_and_eval_regression_share_one_budget():
     assert [e.type for e in events][-1] == "run_failed"
     assert events[-1].data["attempts"] == 2  # run_failed payload: attempts key
     assert events[-1].data["path"]  # path key exists (dashboard reads it with .get)
+
+
+# ---------- Task 6: pre-launch model validation pins (spec D9) ----------
+
+
+def test_unknown_model_honest_runtime_failure():
+    transport = FakeTransport([lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts))])
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "model": "mistral-7b"},
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=on_event,
+    )
+    assert result.success is False
+    # resolve_model raises ConfigurationError("model 'mistral-7b' is not T4-viable; ...")
+    assert "T4-viable" in (result.error or "")
+    assert transport.calls == []  # validation fired BEFORE any launch (D9)
+    assert result.configs_written == []  # nothing written on pre-launch failure
+    assert [e.type for e in events][-1] == "run_failed"
+    assert "job_launched" not in [e.type for e in events]
+
+
+def test_unsupported_model_honest_runtime_failure():
+    transport = FakeTransport([lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts))])
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "model": "deepseek-v3.1"},  # known slug, not T4-viable
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=on_event,
+    )
+    assert result.success is False
+    assert "T4-viable" in (result.error or "")
+    assert transport.calls == []
+
+
+def test_missing_model_key_is_config_error():
+    transport = FakeTransport([lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts))])
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 2e-4},  # no model key -> resolve_model(None)
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=on_event,
+    )
+    assert result.success is False
+    # resolve_model(None) raises "model None is not T4-viable; pick from: ..."
+    assert "model None" in (result.error or "")
+    assert "T4-viable" in (result.error or "")
+    assert transport.calls == []
