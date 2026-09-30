@@ -147,6 +147,9 @@ def render_sidebar() -> Dict[str, any]:
 
     st.sidebar.markdown("### Model (T4-viable)")
     # Plan 3c adjustment: surface a non-whitelist configured model instead of replacing it.
+    # NOTE: no key= for this selectbox — rejection of invalid configured models depends on
+    # `index` participating in the no-key element id (adding key= would let stale widget
+    # state override the configured model and silently clobber pre-launch validation).
     options = list(MODEL_WHITELIST)
     current_model = (st.session_state.get("config") or {}).get("model")
     if isinstance(current_model, str) and current_model and current_model not in options:
@@ -341,7 +344,7 @@ def _loss_figure(events: list):
         points = [None if math.isnan(v) else v for v in ev.data["loss_points"]]
         fig.add_trace(go.Scatter(y=points, mode="lines", name=f"attempt {ev.data['attempt']}"))
     fig.update_layout(
-        title="Training loss (dry-run, per attempt)",
+        title="Training loss (per attempt)",
         xaxis_title="Step",
         yaxis_title="Loss",
         hovermode="x unified",
@@ -375,11 +378,10 @@ def execute_launch(config, max_retries, timeline_slot, logs_slot, chart_slot):
         logs_slot.code(ln[-500:], language="log")
         pts = extract_loss_points(ln)
         if pts:
+            before = len(live_points)
             live_points.extend(p for p in pts if p == p)
-            if live_points:
-                chart_slot.plotly_chart(
-                    _gpu_figure(live_points), width="stretch", key="live_loss_chart"
-                )
+            if len(live_points) > before:
+                chart_slot.plotly_chart(_gpu_figure(live_points), width="stretch")
 
     def on_event(ev: Event) -> None:
         events.append(ev)
@@ -402,7 +404,7 @@ def execute_launch(config, max_retries, timeline_slot, logs_slot, chart_slot):
 
 
 def _gpu_figure(loss_points: list):
-    """Loss curve for a real Colab run (NaN-safe, same style as dry-run chart)."""
+    """Loss curve for a real Colab run (NaN-safe, same style as the live loss chart)."""
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(

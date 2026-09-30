@@ -58,23 +58,41 @@ class FakeTransport:
     def __init__(self, results):
         self.results = list(results)
         self.calls = 0
+        self.last_config = None
 
     def run_attempt(self, config, prompts, on_line=None):
         from supertaco.loop import AttemptResult
 
         self.calls += 1
+        self.last_config = dict(config)
         idx = min(self.calls - 1, len(self.results) - 1)
         item = self.results[idx]
         if isinstance(item, Exception):
             raise item
-        logs, payload, error = item
+        if len(item) == 4:
+            logs, payload, error, artifact = item
+        else:
+            logs, payload, error = item
+            artifact = None
         text = logs
         if payload:
             block = json.dumps(
                 {"base": {p: "base a" for p in prompts}, "fine_tuned": {p: "ft a" for p in prompts}}
             )
             text += f"\n{RESPONSES_START}\n{block}\n{RESPONSES_END}"
-        return AttemptResult(logs=text, artifact=None, error=error)
+        return AttemptResult(logs=text, artifact=artifact, error=error)
+
+
+class StreamingFakeTransport(FakeTransport):
+    """FakeTransport that also drives the live on_line streaming path."""
+
+    def run_attempt(self, config, prompts, on_line=None):
+        res = super().run_attempt(config, prompts, on_line=None)
+        if on_line:
+            on_line("step 4 loss 1.9218")
+            on_line("step 8 loss 1.6969")
+            on_line("training finished")
+        return res
 
 
 def _patch_run(monkeypatch, transport, llm):
@@ -105,9 +123,11 @@ def test_initial_render_no_exceptions(app):
 
 
 def test_success_flow_renders_report(app, monkeypatch, tmp_path):
+    artifact_path = tmp_path / "eval.zip"
+    artifact_path.write_bytes(b"PK\x03\x04fake")
     _patch_run(
         monkeypatch,
-        FakeTransport([(HEALTHY_LOG, "ok", None)]),
+        FakeTransport([(HEALTHY_LOG, "ok", None, artifact_path)]),
         FakeLLM(),
     )
     _launch(app)
@@ -117,6 +137,9 @@ def test_success_flow_renders_report(app, monkeypatch, tmp_path):
     assert result.eval_results is not None
     assert result.attempt_ledger[0].failure_key is None
     assert any("Training Report" in m.value for m in app.markdown)
+    assert len(app.dataframe) >= 2  # attempt ledger + judge table
+    assert len(app.metric) >= 3  # judge base / fine-tuned / improvement
+    assert len(app.get("download_button")) == 1  # adapter artifact download
 
 
 def test_nan_failure_heals_with_patch(app, monkeypatch):
@@ -141,6 +164,41 @@ def test_budget_exhaustion_shows_error_without_traceback(app, monkeypatch):
     assert not app.exception, [e.value for e in app.exception]
     assert any("MaxRetriesExceeded" in e.value for e in app.error)
     assert app.session_state["run_result"].success is False
+
+
+def test_live_streaming_survives_multiple_loss_lines(app, monkeypatch):
+    _patch_run(monkeypatch, StreamingFakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    result = app.session_state["run_result"]
+    assert result.success is True, result.error  # would be False with the duplicate-key bug
+    assert any("training finished" in c.value for c in app.code)  # streamed logs landed
+
+
+def test_knobs_overlay_config_yaml(app, monkeypatch):
+    transport = FakeTransport([(HEALTHY_LOG, "ok", None)])
+    _patch_run(monkeypatch, transport, FakeLLM())
+    app.session_state["config"] = {
+        "learning_rate": 0.0007,
+        "lora_r": 32,
+        "model": "qwen2.5-0.5b",
+        "batch_size": 16,
+    }
+    app.run()
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    seen = transport.last_config
+    # spec D2: knobs overlay the YAML — even at their defaults
+    assert seen["learning_rate"] == pytest.approx(2e-4)  # knob default beats YAML 0.0007
+    assert seen["batch_size"] == 4  # knob default beats YAML 16
+    assert seen["lora_r"] == 8  # knob default beats YAML 32
+    assert seen["model"] == "qwen2.5-0.5b"
+    # an explicitly-set knob wins over both YAML and the default
+    lr_knob = next(w for w in app.number_input if w.label == "learning_rate")
+    lr_knob.set_value(0.0009)
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    assert transport.last_config["learning_rate"] == pytest.approx(0.0009)
 
 
 def test_transport_error_shows_actionable_message(app, monkeypatch):
