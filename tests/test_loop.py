@@ -105,6 +105,7 @@ class FakeLLM:
         )
         is_base = self._n % 2 == 0
         self._n += 1
+        # heal flag takes precedence: healthy arg ignored when True
         if self.heal_after_first_eval:
             healthy_now = self._n > 10  # first eval = 10 calls (5 prompts x base/ft) regresses
         else:
@@ -146,7 +147,13 @@ def test_extract_loss_points_preserves_nan():
 
 
 def test_happy_path_first_attempt_success():
-    transport = FakeTransport([lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts))])
+    transport = FakeTransport(
+        [
+            lambda prompts: make_result(
+                HEALTHY_LOG, responses_for(prompts), artifact="runs/run_001/artifacts/eval.zip"
+            )
+        ]
+    )
     llm = FakeLLM()
     events, on_event = collect_events()
     result = run_training_loop(
@@ -161,6 +168,7 @@ def test_happy_path_first_attempt_success():
     assert result.failure_key is None
     assert result.eval_results is not None
     assert result.eval_results["regression_flagged"] is False
+    assert result.artifact is not None
     assert len(result.attempt_ledger) == 1
     assert result.attempt_ledger[0].failure_key is None
     types = [e.type for e in events]
@@ -498,3 +506,5 @@ def test_log_failure_and_eval_regression_share_one_budget():
     assert [r.failure_key for r in result.attempt_ledger] == ["NAN_LOSS", "EVAL_REGRESSION"]
     assert len(result.configs_written) == 1  # attempt 2 breaks before patching
     assert [e.type for e in events][-1] == "run_failed"
+    assert events[-1].data["attempts"] == 2  # run_failed payload: attempts key
+    assert events[-1].data["path"]  # path key exists (dashboard reads it with .get)

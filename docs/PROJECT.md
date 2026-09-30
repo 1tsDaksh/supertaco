@@ -25,6 +25,7 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
 
+- 2026-09-29: tests: pin artifact propagation and run_failed payload keys (plan Task 5 review fixes).
 - 2026-09-29: tests: pin EVAL_REGRESSION heal within shared relaunch budget + honest missing-block evidence (plan Task 5 + review fixes).
 - 2026-09-29: tests: pin relaunch config delivery, patch_proposed event, failure loss points; FakeLLM patch logging (plan Task 4 review fixes).
 - 2026-09-29: loop/tests: pin nan-patch-retry + budget ledger, evidence paths, classify mode; harden error-path loss extraction (plan Task 4 + review fixes).
