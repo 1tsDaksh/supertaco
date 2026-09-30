@@ -5,6 +5,7 @@ log lines (simulator format) and packs the adapter to /content/lora_adapter.zip
 for `colab download`.
 """
 
+import json  # noqa: F401  # used by Task 9's VM-side result/report code
 import os
 import shutil
 import subprocess
@@ -40,6 +41,7 @@ def main() -> None:
         TrainingArguments,
     )
 
+    # >>> SUPER_TACO_CFG >>>
     CFG = {
         "model": "Qwen/Qwen2.5-0.5B-Instruct",
         "learning_rate": 2e-4,
@@ -51,6 +53,16 @@ def main() -> None:
         "grad_accum": 2,
         "max_rows": 256,
     }
+    # <<< SUPER_TACO_CFG <<<
+    # >>> SUPER_TACO_PROMPTS >>>
+    EVAL_PROMPTS = [  # noqa: F841  # consumed by Task 9's VM-side eval/report code
+        "Explain what LoRA fine-tuning is in two sentences.",
+        "Write a Python function that loads a Hugging Face dataset.",
+        "Summarize why gradient clipping prevents divergence.",
+        "How does a chat template differ from a tokenizer?",
+        "Give one reason eval scores can regress after training.",
+    ]
+    # <<< SUPER_TACO_PROMPTS <<<
     print("config:", CFG, flush=True)
 
     assert torch.cuda.is_available(), "no GPU on the Colab VM"

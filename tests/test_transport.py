@@ -1,9 +1,14 @@
 """Config rendering + Colab transport (spec 5.2/5.3)."""
 
+from pathlib import Path
+
 import pytest
 
 from supertaco.errors import ConfigurationError
-from supertaco.gpu.transport import MODEL_WHITELIST, resolve_model
+from supertaco.gpu.transport import MODEL_WHITELIST, render_script, resolve_model
+
+REPO = Path(__file__).resolve().parents[1]
+TEMPLATE = REPO / "colab" / "train_lora.py"
 
 
 def test_whitelist_keys_resolve_to_hf_ids():
@@ -26,3 +31,31 @@ def test_missing_model_rejected():
         resolve_model(None)
     with pytest.raises(ConfigurationError, match="T4-viable"):
         resolve_model("")
+
+
+def test_render_script_embeds_config_and_prompts(tmp_path):
+    cfg = {
+        "model": "Qwen/Qwen2.5-1.5B-Instruct",
+        "learning_rate": 0.0005,
+        "batch_size": 2,
+        "lora_r": 4,
+        "lora_alpha": 8,
+        "num_epochs": 2,
+    }
+    prompts = ["p one", "p two"]
+    out = render_script(cfg, prompts, TEMPLATE, tmp_path)
+    text = out.read_text(encoding="utf-8")
+    assert out.parent == tmp_path
+    assert "'model': 'Qwen/Qwen2.5-1.5B-Instruct'" in text
+    assert "'learning_rate': 0.0005" in text
+    assert "'batch_size': 2" in text
+    assert "EVAL_PROMPTS = ['p one', 'p two']" in text
+    # template file itself untouched
+    assert "SUPER_TACO_CFG" in TEMPLATE.read_text(encoding="utf-8")
+
+
+def test_render_script_is_deterministic_per_config(tmp_path):
+    cfg = {"model": "Qwen/Qwen2.5-0.5B-Instruct", "learning_rate": 2e-4}
+    a = render_script(cfg, ["x"], TEMPLATE, tmp_path / "a").read_text(encoding="utf-8")
+    b = render_script(cfg, ["x"], TEMPLATE, tmp_path / "b").read_text(encoding="utf-8")
+    assert a == b

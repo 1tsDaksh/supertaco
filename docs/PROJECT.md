@@ -25,6 +25,7 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 
 ## Recent changes (newest first)
 
+- 2026-09-29: transport: marker regions in colab template + deterministic render_script (plan Task 7).
 - 2026-09-29: tests: transport whitelist unit tests; trim redundant loop validation test (plan Task 6 corrected).
 - 2026-09-29: tests: pin pre-launch model validation (unknown / T4-blocked / missing-key honest failures) (plan Task 6).
 - 2026-09-29: tests: pin artifact propagation and run_failed payload keys (plan Task 5 review fixes).

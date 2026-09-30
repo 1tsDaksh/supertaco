@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import pprint
+import re
+from datetime import UTC, datetime
+from pathlib import Path
+
 from supertaco.errors import ConfigurationError
 
 MODEL_WHITELIST: dict[str, str] = {
@@ -27,3 +32,34 @@ def resolve_model(name: object) -> str:
     raise ConfigurationError(
         f"model {name!r} is not T4-viable; pick from: {', '.join(sorted(MODEL_WHITELIST))}"
     )
+
+
+CFG_START = "# >>> SUPER_TACO_CFG >>>"
+CFG_END = "# <<< SUPER_TACO_CFG <<<"
+PROMPTS_START = "# >>> SUPER_TACO_PROMPTS >>>"
+PROMPTS_END = "# <<< SUPER_TACO_PROMPTS <<<"
+
+
+def _swap(text: str, start: str, end: str, replacement: str) -> str:
+    pattern = re.compile(re.escape(start) + r".*?" + re.escape(end), re.S)
+    if not pattern.search(text):
+        raise ValueError(f"template markers missing: {start} .. {end}")
+    return pattern.sub(lambda _m: replacement, text, count=1)
+
+
+def render_script(config: dict, prompts: list[str], template: Path, out_dir: Path) -> Path:
+    """Render a per-attempt training script with the config and prompts embedded."""
+    text = template.read_text(encoding="utf-8")
+    cfg_block = (
+        CFG_START + "\n    CFG = " + pprint.pformat(dict(config), sort_dicts=True) + "\n" + CFG_END
+    )
+    text = _swap(text, CFG_START, CFG_END, cfg_block)
+    prompts_block = (
+        PROMPTS_START + "\n    EVAL_PROMPTS = " + repr(list(prompts)) + "\n" + PROMPTS_END
+    )
+    text = _swap(text, PROMPTS_START, PROMPTS_END, prompts_block)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
+    path = out_dir / f"attempt_{stamp}.py"
+    path.write_text(text, encoding="utf-8")
+    return path
