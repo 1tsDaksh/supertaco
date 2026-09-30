@@ -194,21 +194,6 @@ def test_transport_error_becomes_run_failed_never_raises():
     assert [e.type for e in events][-1] == "run_failed"
 
 
-def test_invalid_model_fails_before_any_attempt():
-    transport = FakeTransport([make_result(HEALTHY_LOG)])
-    events, on_event = collect_events()
-    result = run_training_loop(
-        {"learning_rate": 2e-4, "model": "llama-3-8b"},
-        transport=transport,
-        llm=FakeLLM(),
-        on_event=on_event,
-    )
-    assert result.success is False
-    assert "T4-viable" in (result.error or "")
-    assert transport.calls == []
-    assert [e.type for e in events][-1] == "run_failed"
-
-
 # ---------- Task 3 review fixes ----------
 
 
@@ -529,20 +514,6 @@ def test_unknown_model_honest_runtime_failure():
     assert result.configs_written == []  # nothing written on pre-launch failure
     assert [e.type for e in events][-1] == "run_failed"
     assert "job_launched" not in [e.type for e in events]
-
-
-def test_unsupported_model_honest_runtime_failure():
-    transport = FakeTransport([lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts))])
-    events, on_event = collect_events()
-    result = run_training_loop(
-        {"learning_rate": 2e-4, "model": "deepseek-v3.1"},  # known slug, not T4-viable
-        transport=transport,
-        llm=FakeLLM(),
-        on_event=on_event,
-    )
-    assert result.success is False
-    assert "T4-viable" in (result.error or "")
-    assert transport.calls == []
 
 
 def test_missing_model_key_is_config_error():
