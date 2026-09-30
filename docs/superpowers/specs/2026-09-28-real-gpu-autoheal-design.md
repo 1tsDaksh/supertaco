@@ -1,3 +1,6 @@
+> **SUPERSEDED (2026-09-29):** This Nebius autoheal design was never executed; the approved
+> replacement is `docs/superpowers/specs/2026-09-29-colab-real-loop-design.md`.
+
 # Real GPU Auto-Heal Loop — Design Spec
 
 > Date: 2026-09-28 · Status: approved (design sections approved in chat; pending written-spec review)

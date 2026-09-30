@@ -2317,7 +2317,7 @@ Leave the rest of AGENTS.md alone (the mission text still frames Nebius jobs —
 ```powershell
 python -m pytest tests/ -q
 python -m ruff check .
-python -m ruff format --check supertaco tests scripts
+python -m ruff format --check supertaco tests
 ```
 Expected: all green, zero scoped exclusions. Record any residual format findings in untouched files in `docs/PROJECT.md` rather than fixing them.
 

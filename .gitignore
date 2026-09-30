@@ -33,7 +33,6 @@ colab/output/
 # Configs runs (generated, not committed except examples)
 configs/runs/*
 !configs/runs/*_example.yaml
-!configs/runs/*_broken_model.yaml
 
 # Streamlit
 .streamlit/

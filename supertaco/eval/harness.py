@@ -1,4 +1,4 @@
-"""Fixed 5-prompt eval suite: template responses scored by real judge."""
+"""Fixed 5-prompt eval suite: real VM responses scored by the judge."""
 
 from __future__ import annotations
 

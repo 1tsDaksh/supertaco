@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-09-29):** Point-in-time handoff from 2026-09-24 — historical. The runner was replaced by `supertaco.loop` (colab-real-loop plan); read `docs/AGENTS.md` and `docs/PROJECT.md` for current state.
+
 # HANDOFF.md — SuperTaco
 
 > Project handoff document. Read this fully before touching the codebase.

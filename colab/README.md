@@ -27,7 +27,7 @@ works via a tiny `termios` stub — see `supertaco/gpu/colab.py`).
   `yahma/alpaca-cleaned`, with knobs mirroring the SuperTaco config schema
   (`learning_rate`, `lora_r`, `lora_alpha`, `num_epochs`, `batch_size`).
 - Prints `step N loss X` lines in the same format the simulator emits, so
-  `supertaco.agent.simlogs.extract_loss_points` parses real logs.
+  `supertaco.loop.extract_loss_points` parses real logs.
 - Saves the adapter + tokenizer to `/content/lora_adapter/` and zips it.
 
 ## Manual fallback (browser)

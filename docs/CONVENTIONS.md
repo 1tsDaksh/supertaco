@@ -25,8 +25,6 @@ configs/
   runs/                    # generated/run configs (gitignored except examples)
 tests/
   fixtures/                # real (sanitized) log snippets per failure mode
-scripts/
-  make_broken_configs.py   # generates the broken configs for demos/tests
 logs/                      # gitignored; llm_calls.jsonl lives here
 docs/                      # hackathon notes, feedback draft, demo script
 ```
@@ -51,7 +49,7 @@ docs/                      # hackathon notes, feedback draft, demo script
 
 ## Git discipline
 - Conventional commits: `feat(agent): add OOM failure mode`, `fix(eval): judge timeout`.
-- No commit may contain real API keys, run outputs > 10 MB, or `configs/runs/` (except `*_example.yaml` and `*_broken_model.yaml`).
+- No commit may contain real API keys, run outputs > 10 MB, or `configs/runs/` (except `*_example.yaml`).
 - Every PR/commit message ends with what was tested and how (one line).
 
 ## Agent-loop invariants (tests enforce these)

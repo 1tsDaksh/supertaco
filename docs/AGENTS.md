@@ -11,9 +11,9 @@ launch, monitor, diagnose, and repair LLM fine-tuning jobs running on Nebius AI 
 
 1. **Never commit secrets.** API keys, Nebius tokens, and Tavily keys live in `.env` (gitignored) only.
    If you need a value, read it from `os.environ` / `pydantic-settings`.
-2. **Never run a real Nebius job without a `--dry-run` flag available.** Real GPU runs cost money
-   ($100 AI Cloud credit budget). Every job launcher must support dry-run mode that logs the exact
-   payload it *would* send.
+2. **Never spend real resources without asking.** Colab T4 runs are free but take ~5-15 min each;
+   Token Factory judge calls are the only metered resource. Tests fake the transport and the LLM;
+   only a documented, user-approved live smoke touches either.
 3. **Never modify `configs/base/`**. These are reference configs. Create variants in `configs/runs/`.
 4. **Test before you claim.** If you say something works, you ran the test. No "this should work."
 5. **Small diffs.** One logical change per edit. No drive-by refactors of files you were not asked to touch.
@@ -40,17 +40,11 @@ python -m ruff check .
 python -m ruff format --check .
 python -m mypy supertaco/
 
-# Unit tests (mocked Nebius API — no credits spent)
-python -m pytest tests/ -m "not integration"
+# Unit tests (transport and LLM faked — no network, no credits spent)
+python -m pytest tests/ -q
 
-# Integration test (hits real Nebius API — costs money, needs explicit flag)
-python -m pytest tests/ -m integration
-
-# Dry-run the agent loop on a deliberately broken config (free)
-python -m supertaco.cli run configs/runs/20260923_191506_NAN_LOSS_broken_model.yaml --dry-run
-
-# Full smoke test (real job, single GPU, < 60 min, requires approval)
-python -m supertaco.cli run configs/runs/20260923_191506_NAN_LOSS_broken_model.yaml
+# Real supervisor loop on the default T4 config (free GPU, ~15 min, spends judge tokens - ask first)
+python -m supertaco.cli run configs/defaults/colab_t4.yaml
 ```
 
 ## Style guardrails
