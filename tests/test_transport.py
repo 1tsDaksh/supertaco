@@ -119,3 +119,15 @@ def test_transport_maps_failed_outcome_to_error(tmp_path, monkeypatch):
     res = t.run_attempt({"model": "qwen2.5-0.5b", "learning_rate": 2e-4}, ["p"])
     assert "download failed" in res.error
     assert res.artifact is None
+
+
+def test_template_contains_phase2_generation_and_block(tmp_path):
+    text = TEMPLATE.read_text(encoding="utf-8")
+    assert "disable_adapter()" in text
+    assert "###RESPONSES_JSON###" in text
+    assert "###END_RESPONSES_JSON###" in text
+    assert 'json.dumps({"base"' in text
+    assert "max_new_tokens=150" in text
+    assert "do_sample=False" in text
+    # responses block must land in exec-stream logs before the zip step (split_responses reads logs)
+    assert text.index("###RESPONSES_JSON###") < text.index("shutil.make_archive")

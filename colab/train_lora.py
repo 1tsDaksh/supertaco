@@ -5,7 +5,7 @@ log lines (simulator format) and packs the adapter to /content/lora_adapter.zip
 for `colab download`.
 """
 
-import json  # noqa: F401  # used by Task 9's VM-side result/report code
+import json
 import os
 import shutil
 import subprocess
@@ -55,7 +55,7 @@ def main() -> None:
     }
     # <<< SUPER_TACO_CFG <<<
     # >>> SUPER_TACO_PROMPTS >>>
-    EVAL_PROMPTS = [  # noqa: F841  # consumed by Task 9's VM-side eval/report code
+    EVAL_PROMPTS = [
         "Explain what LoRA fine-tuning is in two sentences.",
         "Write a Python function that loads a Hugging Face dataset.",
         "Summarize why gradient clipping prevents divergence.",
@@ -140,6 +140,40 @@ def main() -> None:
     )
     trainer.train()
     print("training finished", flush=True)
+
+    # ---- phase 2: base vs fine-tuned answers for the judge ----
+    print("phase 2: generating eval answers", flush=True)
+    chat_inputs = [
+        tokenizer.apply_chat_template(
+            [
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": p},
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        for p in EVAL_PROMPTS
+    ]
+
+    def _gen(prompt_text: str) -> str:
+        enc = tokenizer(prompt_text, return_tensors="pt").to(model.device)
+        out_ids = model.generate(
+            **enc, max_new_tokens=150, do_sample=False, pad_token_id=tokenizer.pad_token_id
+        )
+        return tokenizer.decode(
+            out_ids[0][enc["input_ids"].shape[1] :], skip_special_tokens=True
+        ).strip()
+
+    base_answers: dict = {}
+    with model.disable_adapter():
+        for p, t in zip(EVAL_PROMPTS, chat_inputs, strict=True):
+            base_answers[p] = _gen(t)
+    ft_answers: dict = {}
+    for p, t in zip(EVAL_PROMPTS, chat_inputs, strict=True):
+        ft_answers[p] = _gen(t)
+    print("###RESPONSES_JSON###", flush=True)
+    print(json.dumps({"base": base_answers, "fine_tuned": ft_answers}), flush=True)
+    print("###END_RESPONSES_JSON###", flush=True)
 
     out = "/content/lora_adapter"
     os.makedirs(out, exist_ok=True)
