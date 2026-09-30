@@ -143,6 +143,12 @@ def test_extract_loss_points_preserves_nan():
     assert len(pts) == 1 and pts[0] != pts[0]  # NaN
 
 
+def test_extract_loss_points_preserves_lowercase_nan():
+    pts = extract_loss_points("step 4 loss nan\nstep 8 loss nan")
+    assert len(pts) == 2
+    assert all(p != p for p in pts)  # NaN checks
+
+
 # ---------- Task 3: run_training_loop ----------
 
 

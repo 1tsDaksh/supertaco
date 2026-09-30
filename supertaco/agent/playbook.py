@@ -1,10 +1,13 @@
+import re
+
 from supertaco.errors import ConfigurationError
 
 # Playbook v1 — 8 failure modes with typed detection signals and default fixes
 PLAYBOOK = {
     "NAN_LOSS": {
         "detection": lambda log: any(
-            "NaN" in line and "loss" in line.lower() for line in log.splitlines()[-20:]
+            "loss" in line.lower() and re.search(r"\bnan\b", line, re.I)
+            for line in log.splitlines()[-20:]
         ),
         "default_fix": "lower_lr_10x",
         "description": "Loss is NaN in first N steps",

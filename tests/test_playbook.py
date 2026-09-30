@@ -1,5 +1,7 @@
 """Playbook detection fixes required by the runner path."""
 
+from pathlib import Path
+
 from supertaco.agent.playbook import PLAYBOOK, apply_default_fix, detect_failure
 
 
@@ -48,3 +50,18 @@ def test_all_eight_modes_have_detection_and_fix():
                 "num_epochs": 3,
             },
         )
+
+
+def test_detects_lowercase_nan_from_torch_trainer():
+    log = "step 4 loss nan\nstep 8 loss nan\nTraceback: loss became nan"
+    assert detect_failure(log) == "NAN_LOSS"
+
+
+def test_real_healthy_colab_log_detects_no_failure():
+    fixture = Path(__file__).parent / "fixtures" / "real_colab_healthy.log"
+    assert detect_failure(fixture.read_text(encoding="utf-8")) is None
+
+
+def test_real_oom_traceback_detected():
+    log = "step 4 loss 1.92\nCUDA out of memory. Tried to allocate 2.00 GiB"
+    assert detect_failure(log) == "OOM"

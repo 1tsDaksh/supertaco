@@ -24,7 +24,7 @@ from supertaco.agent.playbook import (
 )
 from supertaco.errors import ConfigurationError
 
-LOSS_RE = re.compile(r"\bloss\s+([0-9]+\.[0-9]+|NaN)\b")
+LOSS_RE = re.compile(r"\bloss\s+([0-9]+\.[0-9]+|NaN)\b", re.I)
 
 
 @dataclass

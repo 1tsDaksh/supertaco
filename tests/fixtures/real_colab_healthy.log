@@ -1,0 +1,19 @@
+config: {'model': 'Qwen/Qwen2.5-0.5B-Instruct', 'learning_rate': 0.0002, 'lora_r': 8}
+gpu: Tesla T4
+dataset rows: 256
+trainable params: 1,081,344 || all params: 495,114,112 || trainable%: 0.2184
+[ 4/32 00:01 < 00:16, 1.78 it/s, Epoch 0.12/1]
+step 4 loss 1.9218
+[ 8/32 00:03 < 00:13, 1.97 it/s, Epoch 0.25/1]
+step 8 loss 1.6969
+[ 12/32 00:05 < 00:11, 1.78 it/s, Epoch 0.34/1]
+step 12 loss 1.7044
+[ 16/32 00:07 < 00:08, 1.82 it/s, Epoch 0.47/1]
+step 16 loss 1.4154
+[ 24/32 00:11 < 00:04, 1.90 it/s, Epoch 0.72/1]
+step 24 loss 1.2329
+[ 32/32 00:16, Epoch 1/1]
+step 32 loss 1.3245
+training finished
+phase 2: generating eval answers
+artifact: /content/lora_adapter.zip
