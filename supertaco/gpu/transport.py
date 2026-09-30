@@ -53,10 +53,14 @@ def render_script(config: dict, prompts: list[str], template: Path, out_dir: Pat
     cfg_block = (
         CFG_START + "\n    CFG = " + pprint.pformat(dict(config), sort_dicts=True) + "\n" + CFG_END
     )
-    text = _swap(text, CFG_START, CFG_END, cfg_block)
     prompts_block = (
         PROMPTS_START + "\n    EVAL_PROMPTS = " + repr(list(prompts)) + "\n" + PROMPTS_END
     )
+    if any(m in cfg_block for m in (PROMPTS_START, PROMPTS_END)):
+        raise ValueError("config values may not contain template markers")
+    if any(m in prompts_block for m in (CFG_START, CFG_END)):
+        raise ValueError("prompts may not contain template markers")
+    text = _swap(text, CFG_START, CFG_END, cfg_block)
     text = _swap(text, PROMPTS_START, PROMPTS_END, prompts_block)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")

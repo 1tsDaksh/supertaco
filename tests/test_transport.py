@@ -1,5 +1,6 @@
 """Config rendering + Colab transport (spec 5.2/5.3)."""
 
+import py_compile
 from pathlib import Path
 
 import pytest
@@ -59,3 +60,15 @@ def test_render_script_is_deterministic_per_config(tmp_path):
     a = render_script(cfg, ["x"], TEMPLATE, tmp_path / "a").read_text(encoding="utf-8")
     b = render_script(cfg, ["x"], TEMPLATE, tmp_path / "b").read_text(encoding="utf-8")
     assert a == b
+
+
+def test_rendered_script_is_valid_python(tmp_path):
+    cfg = {"model": "Qwen/Qwen2.5-0.5B-Instruct", "learning_rate": 2e-4}
+    out = render_script(cfg, ["prompt with 'quote' and\nnewline"], TEMPLATE, tmp_path)
+    py_compile.compile(str(out), doraise=True)
+
+
+def test_config_value_containing_markers_rejected(tmp_path):
+    cfg = {"model": "Qwen/Qwen2.5-0.5B-Instruct", "evil": "# >>> SUPER_TACO_PROMPTS >>>"}
+    with pytest.raises(ValueError, match="template markers"):
+        render_script(cfg, ["x"], TEMPLATE, tmp_path)
