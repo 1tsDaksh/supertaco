@@ -3,24 +3,23 @@
 ## Folder structure
 ```
 supertaco/                 # src package
-  cli.py                   # entry point: `supertaco run <config> [--dry-run]`
+  cli.py                   # entry point: `supertaco run <config>`
   settings.py              # pydantic-settings, env loading
   errors.py                # typed exceptions
-  nebius/
-    jobs.py                # Serverless Job launch/stop/status (SDK wrapper)
-    endpoints.py           # Serverless Endpoint deploy/undeploy
-    storage.py             # log/checkpoint object storage helpers
+  loop.py                  # real supervisor loop (attempts, events, eval gate)
   agent/
-    graph.py               # LangGraph supervisor state machine
     playbook.py            # 8 failure modes: detection signals + fixes (typed, data-driven)
     llm.py                 # Nemotron client + cost-routing escalation logic
-    tools.py               # @tool functions (patch_config, launch_job, tavily_lookup)
   eval/
     harness.py             # fixed prompt suite runner + judge
     judges.py              # Nemotron-judge scoring
+  gpu/
+    transport.py           # ColabTransport: render -> run_training -> AttemptResult
+    colab.py               # Colab session adapter (new -> exec -> download -> stop)
   ui/
     dashboard.py           # Streamlit app
 configs/
+  defaults/                # committed default configs (colab_t4.yaml)
   base/                    # REFERENCE CONFIGS — NEVER MODIFY
   runs/                    # generated/run configs (gitignored except examples)
 tests/
@@ -32,7 +31,7 @@ docs/                      # hackathon notes, feedback draft, demo script
 ## Naming rules
 - Modules & functions: `snake_case`. Classes: `PascalCase`. Constants: `UPPER_SNAKE`.
 - Config files: `runs/<timestamp>_<slug>.yaml` — never overwrite; new file per attempt.
-- Agent nodes in the LangGraph: verb phrases — `classify_failure`, `propose_patch`, `launch_job`.
+- Supervisor-loop actions: verb phrases — `classify_failure`, `propose_patch`, `run_attempt`.
 - Failure modes in the playbook: `UPPER_SNAKE` keys, e.g. `NAN_LOSS`, `OOM`, `LOSS_DIVERGENCE`,
   `LOSS_PLATEAU`, `EVAL_REGRESSION`, `TOKENIZER_MISMATCH`, `DATALOADER_STALL`, `GRADIENT_EXPLOSION`.
 
@@ -56,4 +55,5 @@ docs/                      # hackathon notes, feedback draft, demo script
 1. Max 3 relaunches per run record; 4th attempt must raise `MaxRetriesExceeded`.
 2. Every LLM call writes one line to `logs/llm_calls.jsonl` (model, tokens, latency, escalation reason).
 3. Every config patch produces a NEW file in `configs/runs/`; the previous file is never edited.
-4. Dry-run mode never instantiates a real Nebius client.
+4. Tests never touch real infrastructure: the Colab transport and the LLM are faked or
+   monkeypatched — no network calls, no Colab session, no Token Factory traffic.

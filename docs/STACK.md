@@ -8,19 +8,14 @@
 ## Core dependencies (pyproject.toml)
 | Package | Version constraint | Why |
 |---|---|---|
-| langgraph | ^0.6 | Agent supervisor state machine |
-| langchain-core | ^0.3 | Tool/chain plumbing (no langchain full package) |
-| openai | ^1.5x | Client for Nebius Token Factory (OpenAI-compatible endpoint) |
-| nebius | latest stable | Nebius AI Cloud SDK (jobs, endpoints, object storage) |
-| pydantic | ^2.9 | Config + payload models |
-| pydantic-settings | ^2.6 | Env-based settings |
-| structlog | ^24.4 | Structured logging |
-| streamlit | ^1.4x | Dashboard UI |
-| datasets | ^3.x | HF dataset loading for eval suite |
-| tavily-python | ^0.5 | Error-context search (prize category) |
-| plotly | ^5.0 | Dashboard charts |
-| pyyaml | ^6.0 | YAML config parsing (dashboard) |
-| httpx | ^0.27 | HTTP client used by `supertaco/nebius/jobs.py` |
+| openai | >=1.5 | Client for Nebius Token Factory (OpenAI-compatible endpoint) |
+| pydantic | >=2.9 | Config + payload models |
+| pydantic-settings | >=2.6 | Env-based settings |
+| structlog | >=24.4 | Structured logging |
+| streamlit | >=1.4 | Dashboard UI |
+| datasets | >=3.0 | HF dataset loading for eval suite |
+| plotly | >=5.0 | Dashboard charts |
+| pyyaml | >=6.0 | YAML config parsing (dashboard) |
 
 ## Model endpoints (Nebius Token Factory, OpenAI-compatible)
 | Role | Model ID | Use |
@@ -32,10 +27,10 @@
 Cost routing rule: start at nano; escalate to super on low confidence; ultra only when playbook
 misses. Log every escalation.
 
-## Training stack (runs on Nebius AI Cloud, NOT in this repo's deps)
-- LLaMA-Factory (pinned via container image tag, not pip) + LoRA
-- Single GPU per run (L40S/H100), target < 60 min per run
-- Base model: small open model, e.g. Llama-3.1-8B or Nemotron variant
+## Training stack (runs on a Google Colab free T4 via `colab/train_lora.py`, NOT in this repo's deps)
+- PEFT/LoRA via `peft` + `transformers` `Trainer` (installed at runtime inside the Colab VM)
+- Single T4 GPU per run (free tier), target < 60 min per run
+- Base model: small open model, e.g. `Qwen/Qwen2.5-0.5B-Instruct` or a Nemotron variant
 
 ## Tooling versions
 - ruff ^0.8 (lint + format)
@@ -46,13 +41,13 @@ misses. Log every escalation.
 ```
 NEBIUS_API_KEY=            # AI Cloud + Token Factory
 NEBIUS_PROJECT_ID=
-TAVILY_API_KEY=
 TOKEN_FACTORY_BASE_URL=    # OpenAI-compatible base URL
-SANDBOXTUNE_ENV=dev        # dev | prod — prod blocks dry-run-only bypasses
+SANDBOXTUNE_ENV=dev        # dev | prod
 ```
 
 ## Deprecated / do-not-use list
-- Do not use `langchain` (monolith) — only `langchain-core`.
-- Do not use `transformers` Trainer directly — LLaMA-Factory only.
-- Do not use `requests` — use `httpx` if needed.
+- Do not use `langchain` (monolith) or `langchain-core` — neither is a dependency.
+- Do not use LLaMA-Factory — training runs in the Colab VM via `colab/train_lora.py` (PEFT +
+  transformers, installed at runtime, not repo deps).
+- Do not use `requests` or `httpx` — neither is a dependency; the `openai` client covers HTTP.
 - Do not use conda or poetry anywhere in the repo.

@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-09-29):** Historical spec — superseded by docs/AGENTS.md and the colab-real-loop plan/spec; Nebius/Tavily/dry-run references below are obsolete.
+
 # SPEC.md — Functional Requirements & User Stories
 
 ## Product summary

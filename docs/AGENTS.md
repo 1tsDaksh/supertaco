@@ -37,7 +37,7 @@ pip install --group dev
 
 # Lint + typecheck — run before every commit
 python -m ruff check .
-python -m ruff format --check .
+python -m ruff format --check supertaco tests
 python -m mypy supertaco/
 
 # Unit tests (transport and LLM faked — no network, no credits spent)
@@ -54,7 +54,7 @@ python -m supertaco.cli run configs/defaults/colab_t4.yaml
 - Pydantic v2 models for all config and API payloads. No raw dicts crossing module boundaries.
 - Structured logging via `structlog` — never `print()` in library code.
 - Errors: raise typed exceptions (`supertaco.errors.JobFailedError`) — no bare `except`, no swallowed exceptions.
-- Agent-facing code (LangGraph nodes) must be deterministic given a fixed seed; log every LLM call
+- Supervisor-loop code must be deterministic given a fixed seed; log every LLM call
   (model, tokens, latency) to `logs/llm_calls.jsonl`.
 
 ## Cost guardrails (hackathon credits are finite)

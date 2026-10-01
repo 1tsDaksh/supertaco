@@ -1,29 +1,33 @@
 # PROJECT.md — SuperTaco
 
 ## Summary (one paragraph)
-SuperTaco is an AI-supervised fine-tuning sandbox: a user submits a dataset + goal, and an agent
-writes the training config, launches the job on Nebius AI Cloud (Serverless Jobs), watches the logs
-and metrics, diagnoses failures (NaN loss, OOM, divergence, eval regression), patches the config,
-and retries — up to 3 times — until a checkpoint is produced, evaluated against a fixed prompt
-suite, and deployed to a Serverless Endpoint for side-by-side before/after comparison. Built on
-Nemotron models (via Nebius Token Factory) for the agent brain, Tavily for error-context lookup,
-and LLaMA-Factory + LoRA for the actual training.
+SuperTaco is an AI-supervised fine-tuning sandbox: a user submits a dataset + goal, and the
+supervisor loop (`supertaco/loop.py`) writes the training config, runs LoRA training attempts on a
+free Google Colab T4 (via `supertaco/gpu/colab.py`), streams the logs, diagnoses failures (NaN loss,
+OOM, divergence, eval regression) with a data-driven playbook, patches the config into a new file,
+and retries - up to 3 times - until a checkpoint is produced. Before/after answers are generated on
+the VM and scored by a Nemotron judge (via Nebius Token Factory); attempt ledger, logs, and scores
+are surfaced in a Streamlit dashboard.
 
 ## Current state
-**Phase 1 — manual pipeline** (in progress)
+**colab-real-loop plan - Task 14 (docs finalization) in progress**
 
 - [x] Repo scaffolded, license (Apache 2.0), .env template
-- [x] LLaMA-Factory LoRA smoke config for a small model (single GPU, < 60 min)
-- [ ] Manual training run end-to-end on Nebius AI Cloud via SDK
-- [ ] Checkpoint → Serverless Endpoint deployment (manual)
-- [ ] Before/after eval harness (5 fixed prompts + judge)
-- [ ] **Gate: demo-able manual pipeline before starting the agent**
+- [x] Supervisor loop (`supertaco/loop.py`) runs real Colab T4 attempts with auto-heal (plan Tasks 1-4)
+- [x] ColabTransport + CLI/dashboard wired to the real loop (plan Tasks 5-12)
+- [x] Simulation runner, Nebius stubs, broken fixtures deleted (plan Task 13)
+- [ ] Docs sweep for stale Nebius/dry-run/stack references (Task 14 review fixes; this commit)
+- [ ] First live loop smoke: attempt failed on-VM with `KeyError: max_rows`; fix + rerun pending
+      (parallel agent landing the fix)
+- [ ] Task 14 final gates + recorded smoke result
 
 ## Active task
-**NOW:** Get the first real LoRA training job running on Nebius AI Cloud using the Python SDK,
-verify logs stream to object storage, and confirm the endpoint deploys.
+**NOW:** Task 14 docs sweep - this commit removes stale Nebius/dry-run/stack references flagged in
+the review of `64fe723`. The first live loop smoke attempt failed on-VM with
+`KeyError: max_rows`; fix and rerun pending (landing in parallel).
 
 ## Recent changes (newest first)
+- 2026-09-30: docs: STACK/README/CONVENTIONS/SPEC/AGENTS/PROJECT sweep - stale Nebius/dry-run refs removed; README usage matches real CLI; colab plan format-gate line fixed (Task 14 review fixes).
 
 - 2026-09-29: docs: superseded banners, AGENTS rule 2 for Colab, stale-doc/dep cleanup (plan Task 14 docs pass; live smoke record to follow).
 - 2026-09-29: note: AGENTS.md mission text still frames Nebius jobs — stale, deliberately left out of scope for Task 14.
@@ -84,11 +88,9 @@ verify logs stream to object storage, and confirm the endpoint deploys.
 - 2026-09-22: Wrote agent docs (AGENTS/PROJECT/STACK/CONVENTIONS/SPEC). Repo scaffolded.
 
 ## Up next (rough order)
-1. Manual training job + endpoint deploy (this week)
-2. Agent supervisor loop with 8-failure-mode playbook (LangGraph)
-3. Streamlit dashboard: live logs, loss curves, retry timeline, eval panel
-4. Tavily integration for unknown-error doc lookup
-5. Demo video script + README polish + submission feedback write-up
+1. Land the on-VM `max_rows` fix; rerun and record the first live loop smoke
+2. Finish Task 14 gates and close out the docs sweep
+3. Demo video script + README polish + submission feedback write-up
 
 ## Constraints to remember
 - Deadline: **2026-10-30**. Fully online hackathon.

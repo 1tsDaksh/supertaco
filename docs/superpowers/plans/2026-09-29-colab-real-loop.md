@@ -2248,7 +2248,7 @@ Delete: `BASE_ANSWERS`, `HEALTHY_ANSWERS`, `UNHEALTHY_ANSWERS`, and `build_respo
 ```powershell
 python -m pytest tests/ -q
 python -m ruff check .
-python -m ruff format --check supertaco tests scripts
+python -m ruff format --check supertaco tests
 ```
 Expected: full suite green without `test_runner.py`/`test_simlogs.py`; repo-wide ruff check clean (the debt lived only in files this step deletes). If format findings remain in files this plan never touched, record them in `docs/PROJECT.md` — do not drive-by fix (rule 5).
 

@@ -20,7 +20,6 @@ Cost routing starts at nano and escalates to super/ultra only when needed. All L
 
 ## Token Factory / AI Cloud credits
 - Budget: $50 Token Factory credits + $100 AI Cloud credits
-- All job launches support `--dry-run` mode
 - Production runs require explicit human approval
 
 ## Usage
@@ -28,9 +27,10 @@ Cost routing starts at nano and escalates to super/ultra only when needed. All L
 # Install dependencies
 uv sync
 
-# Run a fine-tuning job (dry-run first)
-sandboxtune run configs/runs/broken_nan_loss.yaml --dry-run
-
-# Run with real Nebius job (requires API key)
-sandboxtune run configs/runs/smoke_test.yaml
+# Run the real supervisor loop on the default T4 config
+# (free Colab GPU, ~15 min; spends judge tokens - ask first)
+supertaco run configs/defaults/colab_t4.yaml
 ```
+
+Lint/typecheck/test gates: see the "Testing & validation commands" section in
+[docs/AGENTS.md](docs/AGENTS.md).
