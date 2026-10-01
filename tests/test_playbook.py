@@ -65,3 +65,19 @@ def test_real_healthy_colab_log_detects_no_failure():
 def test_real_oom_traceback_detected():
     log = "step 4 loss 1.92\nCUDA out of memory. Tried to allocate 2.00 GiB"
     assert detect_failure(log) == "OOM"
+
+
+def test_eval_regression_fix_changes_the_shipped_default_config():
+    """Live smoke 2026-10-01: floors equalled defaults -> patch was a byte-identical no-op."""
+    import yaml
+
+    cfg = yaml.safe_load(
+        (Path(__file__).parent.parent / "configs" / "defaults" / "colab_t4.yaml").read_text()
+    )
+    fixed = apply_default_fix("EVAL_REGRESSION", cfg)
+    assert fixed != cfg  # the no-op bug
+    # and every declared lever must actually move on the default config:
+    assert fixed["lora_r"] < cfg["lora_r"]
+    assert fixed["lora_alpha"] < cfg["lora_alpha"]
+    assert fixed["learning_rate"] < cfg["learning_rate"]
+    assert fixed["lora_dropout"] > cfg["lora_dropout"]

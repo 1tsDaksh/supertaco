@@ -440,9 +440,11 @@ def test_eval_regression_triggers_patch_then_heals():
     assert failure_events[0].data["failure_key"] == "EVAL_REGRESSION"
     patch = next(e for e in events if e.type == "patch_written")
     assert patch.data["failure_key"] == "EVAL_REGRESSION"
-    assert patch.data["after"]["lora_r"] == 8  # max(8, 8//2) floors at 8
-    assert patch.data["after"]["lora_alpha"] == 16  # floor at 16
+    assert patch.data["after"]["lora_r"] == 4  # max(4, 8//2) floors at 4
+    assert patch.data["after"]["lora_alpha"] == 8  # max(8, 16//2) floors at 8
     assert patch.data["after"]["num_epochs"] == 2  # -1 epoch
+    assert patch.data["after"]["learning_rate"] == 1e-4  # 2e-4 / 2
+    assert patch.data["after"]["lora_dropout"] == 0.1  # default 0.05 doubled
     assert result.success is True
     assert result.attempts == 2
     # review addendum: classify sees HEALTHY logs on an eval regression -> verdict must diverge

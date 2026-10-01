@@ -27,6 +27,7 @@ the review of `64fe723`. The first live loop smoke attempt failed on-VM with
 `KeyError: max_rows`; fix and rerun pending (landing in parallel).
 
 ## Recent changes (newest first)
+- 2026-09-30: fix: EVAL_REGRESSION playbook patch was a no-op on the shipped default config - floors lowered below defaults + lr/dropout levers now move every retry (live smoke 1 finding).
 - 2026-10-01: fix: max_rows KeyError in on-VM training script - .get defaults for max_rows and grad_accum (Task 14 live-smoke debug).
 - 2026-09-30: docs: STACK/README/CONVENTIONS/SPEC/AGENTS/PROJECT sweep - stale Nebius/dry-run refs removed; README usage matches real CLI; colab plan format-gate line fixed (Task 14 review fixes).
 

@@ -155,9 +155,11 @@ def apply_default_fix(failure_key: str, config: dict) -> dict:
         },
         "EVAL_REGRESSION": lambda c: {
             **c,
-            "lora_r": max(8, c.get("lora_r", 8) // 2),
-            "lora_alpha": max(16, c.get("lora_alpha", 16) // 2),
+            "lora_r": max(4, c.get("lora_r", 8) // 2),
+            "lora_alpha": max(8, c.get("lora_alpha", 16) // 2),
             "num_epochs": max(1, c.get("num_epochs", 3) - 1),
+            "learning_rate": c.get("learning_rate", 1e-4) / 2,
+            "lora_dropout": min(0.2, round(c.get("lora_dropout", 0.05) * 2, 3)),
         },
         "TOKENIZER_MISMATCH": lambda c: {
             **c,
