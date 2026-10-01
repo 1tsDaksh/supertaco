@@ -1,12 +1,22 @@
 """Config rendering + Colab transport (spec 5.2/5.3)."""
 
+import ast
 import py_compile
+import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from supertaco.errors import ConfigurationError
-from supertaco.gpu.transport import MODEL_WHITELIST, ColabTransport, render_script, resolve_model
+from supertaco.gpu.transport import (
+    CFG_END,
+    CFG_START,
+    MODEL_WHITELIST,
+    ColabTransport,
+    render_script,
+    resolve_model,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 TEMPLATE = REPO / "colab" / "train_lora.py"
@@ -66,6 +76,22 @@ def test_rendered_script_is_valid_python(tmp_path):
     cfg = {"model": "Qwen/Qwen2.5-0.5B-Instruct", "learning_rate": 2e-4}
     out = render_script(cfg, ["prompt with 'quote' and\nnewline"], TEMPLATE, tmp_path)
     py_compile.compile(str(out), doraise=True)
+
+
+def test_rendered_config_covers_all_subscripted_cfg_keys(tmp_path):
+    # live-smoke regression: rendering with the default config (which carries
+    # only the dashboard knobs) must not drop keys the on-VM script subscripts
+    cfg = yaml.safe_load(
+        (REPO / "configs" / "defaults" / "colab_t4.yaml").read_text(encoding="utf-8")
+    )
+    cfg["model"] = resolve_model(cfg["model"])
+    out = render_script(cfg, ["p"], TEMPLATE, tmp_path)
+    text = out.read_text(encoding="utf-8")
+    block = text.split(CFG_START, 1)[1].split(CFG_END, 1)[0]
+    rendered_cfg = ast.literal_eval(block.split("CFG = ", 1)[1].strip())
+    subscripts = sorted({key for key in re.findall(r"CFG\[\s*['\"](\w+)['\"]\s*\]", text)})
+    missing = [key for key in subscripts if key not in rendered_cfg]
+    assert not missing, f"rendered script subscripts keys absent from rendered CFG: {missing}"
 
 
 def test_config_value_containing_markers_rejected(tmp_path):

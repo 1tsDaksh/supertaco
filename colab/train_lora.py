@@ -81,7 +81,7 @@ def main() -> None:
         }
 
     ds = datasets.load_dataset("yahma/alpaca-cleaned", split="train")
-    ds = ds.select(range(CFG["max_rows"])).map(to_messages)
+    ds = ds.select(range(CFG.get("max_rows", 256))).map(to_messages)
 
     tokenizer = AutoTokenizer.from_pretrained(CFG["model"])
     if tokenizer.pad_token is None:
@@ -119,7 +119,7 @@ def main() -> None:
     args = TrainingArguments(
         output_dir="/content/out",
         per_device_train_batch_size=CFG["batch_size"],
-        gradient_accumulation_steps=CFG["grad_accum"],
+        gradient_accumulation_steps=CFG.get("grad_accum", 2),
         learning_rate=CFG["learning_rate"],
         num_train_epochs=CFG["num_epochs"],
         fp16=True,
