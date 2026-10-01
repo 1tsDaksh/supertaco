@@ -22,6 +22,7 @@ configs/
   defaults/                # committed default configs (colab_t4.yaml)
   base/                    # REFERENCE CONFIGS — NEVER MODIFY
   runs/                    # generated/run configs (gitignored except examples)
+colab/                     # Colab T4 training script template (train_lora.py)
 tests/
   fixtures/                # real (sanitized) log snippets per failure mode
 logs/                      # gitignored; llm_calls.jsonl lives here

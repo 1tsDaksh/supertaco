@@ -946,6 +946,12 @@ git add tests/test_loop.py
 git commit -m "test: pin eval-regression feedback loop (EVAL_REGRESSION shares relaunch budget)"
 ```
 
+> **Booked fix (2026-09-30, live smoke):** the EVAL_REGRESSION formula pinned above floors at
+> r=8/alpha=16/epochs=1 — identical to the shipped default config, so the patch was a total
+> no-op (two byte-identical `*_patched.yaml` in live run 1). Fixed: floors lowered to 4/8,
+> plus `learning_rate /= 2` and `lora_dropout = min(0.2, dropout*2)` so every retry changes at
+> least one lever; `tests/test_loop.py` assertions at plan:887-889 updated to match.
+
 ---
 
 ### Task 6: whitelist tests for `resolve_model` (Milestone 2)

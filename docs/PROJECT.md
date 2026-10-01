@@ -10,27 +10,30 @@ the VM and scored by a Nemotron judge (via Nebius Token Factory); attempt ledger
 are surfaced in a Streamlit dashboard.
 
 ## Current state
-**colab-real-loop plan - Task 14 (docs finalization) in progress**
+**colab-real-loop plan - Task 14 review follow-ups landed; live smoke rerun pending**
 
 - [x] Repo scaffolded, license (Apache 2.0), .env template
 - [x] Supervisor loop (`supertaco/loop.py`) runs real Colab T4 attempts with auto-heal (plan Tasks 1-4)
 - [x] ColabTransport + CLI/dashboard wired to the real loop (plan Tasks 5-12)
 - [x] Simulation runner, Nebius stubs, broken fixtures deleted (plan Task 13)
-- [ ] Docs sweep for stale Nebius/dry-run/stack references (Task 14 review fixes; this commit)
-- [ ] First live loop smoke: attempt failed on-VM with `KeyError: max_rows`; fix + rerun pending
-      (parallel agent landing the fix)
+- [x] Docs sweep for stale Nebius/dry-run/stack references (Task 14 review fixes; completed in `8acd6c6`)
+- [x] On-VM `KeyError: max_rows` from first live smoke - fixed in `d86c885`
+- [x] EVAL_REGRESSION playbook patch was a no-op at defaults - fixed in `4824c57`
+- [x] Task 14 code-review doc fixes - landed in this commit
+- [ ] First live loop smoke rerun - pending
 - [ ] Task 14 final gates + recorded smoke result
 
 ## Active task
-**NOW:** Task 14 docs sweep - this commit removes stale Nebius/dry-run/stack references flagged in
-the review of `64fe723`. The first live loop smoke attempt failed on-VM with
-`KeyError: max_rows`; fix and rerun pending (landing in parallel).
+**NOW:** Task 14 code-review doc fixes - this commit formats `errors.py` so the scoped format gate
+is green, and lands README/STACK/CONVENTIONS/plan review follow-ups. The `max_rows` fix landed in
+`d86c885`, the EVAL_REGRESSION no-op fix landed in `4824c57`; the live loop smoke rerun is still
+pending.
 
 ## Recent changes (newest first)
+- 2026-09-30: docs: errors.py formatted so scoped format gate is green; README/STACK/CONVENTIONS review fixes; plan Task 5 booked-fix note (Task 14 review follow-ups).
 - 2026-09-30: fix: EVAL_REGRESSION playbook patch was a no-op on the shipped default config - floors lowered below defaults + lr/dropout levers now move every retry (live smoke 1 finding).
 - 2026-10-01: fix: max_rows KeyError in on-VM training script - .get defaults for max_rows and grad_accum (Task 14 live-smoke debug).
 - 2026-09-30: docs: STACK/README/CONVENTIONS/SPEC/AGENTS/PROJECT sweep - stale Nebius/dry-run refs removed; README usage matches real CLI; colab plan format-gate line fixed (Task 14 review fixes).
-
 - 2026-09-29: docs: superseded banners, AGENTS rule 2 for Colab, stale-doc/dep cleanup (plan Task 14 docs pass; live smoke record to follow).
 - 2026-09-29: note: AGENTS.md mission text still frames Nebius jobs — stale, deliberately left out of scope for Task 14.
 - 2026-09-29: cleanup: delete simulated runner, Nebius stubs, broken fixtures; harness loses build_responses (plan Task 13).
@@ -90,7 +93,7 @@ the review of `64fe723`. The first live loop smoke attempt failed on-VM with
 - 2026-09-22: Wrote agent docs (AGENTS/PROJECT/STACK/CONVENTIONS/SPEC). Repo scaffolded.
 
 ## Up next (rough order)
-1. Land the on-VM `max_rows` fix; rerun and record the first live loop smoke
+1. Rerun the first live loop smoke (max_rows fix `d86c885` + EVAL_REGRESSION fix `4824c57` in) and record the result
 2. Finish Task 14 gates and close out the docs sweep
 3. Demo video script + README polish + submission feedback write-up
 

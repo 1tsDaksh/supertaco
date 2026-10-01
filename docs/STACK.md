@@ -39,9 +39,10 @@ misses. Log every escalation.
 
 ## Environment variables (.env, gitignored)
 ```
-NEBIUS_API_KEY=            # AI Cloud + Token Factory
+NEBIUS_API_KEY=            # Token Factory only
 NEBIUS_PROJECT_ID=
 TOKEN_FACTORY_BASE_URL=    # OpenAI-compatible base URL
+TAVILY_API_KEY=            # legacy setting still read by settings.py; tavily package removed
 SANDBOXTUNE_ENV=dev        # dev | prod
 ```
 

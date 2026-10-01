@@ -4,8 +4,9 @@ AI-supervised fine-tuning sandbox for the Nebius x NVIDIA Global AI Hackathon.
 
 ## Product summary
 An AI-supervised fine-tuning sandbox. User supplies (dataset, base model, goal). The agent writes
-the config, launches training on Nebius AI Cloud, monitors it, auto-heals failures using a
-data-driven playbook, then evaluates and deploys the checkpoint — showing before/after results.
+the config, launches training on a free Colab T4 (via `colab/train_lora.py`), monitors it,
+auto-heals failures using a data-driven playbook, then evaluates and deploys the checkpoint —
+showing before/after results.
 
 ## License
 See [LICENSE](LICENSE) for Apache 2.0 licensing terms.
