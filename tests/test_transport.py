@@ -172,3 +172,7 @@ def test_template_has_data_region_and_dual_loader():
     assert "yahma/alpaca-cleaned" in text
     # region stays inside main(), before the eval-response block
     assert text.index("# >>> SUPER_TACO_DATA >>>") < text.index("###RESPONSES_JSON###")
+    # _swap replaces count=1 — a duplicate marker would silently retarget the span
+    assert text.count("# >>> SUPER_TACO_DATA >>>") == 1
+    assert text.count("# <<< SUPER_TACO_DATA <<<") == 1
+    assert text.index("# >>> SUPER_TACO_DATA >>>") < text.index('DATA.get("kind")')

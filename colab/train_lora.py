@@ -51,7 +51,6 @@ def main() -> None:
         "num_epochs": 1,
         "batch_size": 4,
         "grad_accum": 2,
-        "max_rows": 256,
     }
     # <<< SUPER_TACO_CFG <<<
     # >>> SUPER_TACO_PROMPTS >>>
@@ -85,9 +84,12 @@ def main() -> None:
 
     if DATA.get("kind") == "hf":
         ds = datasets.load_dataset(DATA.get("hf_id") or "yahma/alpaca-cleaned", split="train")
-        ds = ds.select(range(min(DATA.get("max_rows", 256), len(ds))))
+        max_n = max(0, int(DATA.get("max_rows") or 256))
+        ds = ds.select(range(min(max_n, len(ds))))
     else:
         ds = datasets.Dataset.from_list(DATA.get("rows") or [])
+    if len(ds) == 0:
+        raise ValueError("training dataset is empty")
     ds = ds.map(to_messages)
 
     tokenizer = AutoTokenizer.from_pretrained(CFG["model"])
