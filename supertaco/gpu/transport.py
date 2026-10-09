@@ -40,6 +40,9 @@ CFG_START = "# >>> SUPER_TACO_CFG >>>"
 CFG_END = "# <<< SUPER_TACO_CFG <<<"
 PROMPTS_START = "# >>> SUPER_TACO_PROMPTS >>>"
 PROMPTS_END = "# <<< SUPER_TACO_PROMPTS <<<"
+DATA_START = "# >>> SUPER_TACO_DATA >>>"
+DATA_END = "# <<< SUPER_TACO_DATA <<<"
+ALPACA_DEFAULT = {"kind": "hf", "hf_id": "yahma/alpaca-cleaned", "max_rows": 256, "rows": None}
 
 
 def _swap(text: str, start: str, end: str, replacement: str) -> str:
@@ -50,20 +53,39 @@ def _swap(text: str, start: str, end: str, replacement: str) -> str:
 
 
 def render_script(config: dict, prompts: list[str], template: Path, out_dir: Path) -> Path:
-    """Render a per-attempt training script with the config and prompts embedded."""
+    """Render a per-attempt script with config, prompts and dataset embedded."""
     text = template.read_text(encoding="utf-8")
+    cfg_values = {k: v for k, v in config.items() if k not in ("dataset", "eval_prompts")}
+    raw_dataset = config.get("dataset")
+    if raw_dataset is not None and not isinstance(raw_dataset, dict):
+        raise ValueError("dataset must be a mapping")
+    raw = dict(raw_dataset or {})
+    if "kind" not in raw and raw.get("rows"):
+        raw["kind"] = "synthetic"
+    dataset = {**ALPACA_DEFAULT, **raw}
+    if dataset.get("kind") != "hf" and not dataset.get("rows"):
+        dataset = {
+            **ALPACA_DEFAULT,
+            "note": "synthetic plan had no materialized rows; fell back to the alpaca slice",
+        }
     cfg_block = (
-        CFG_START + "\n    CFG = " + pprint.pformat(dict(config), sort_dicts=True) + "\n" + CFG_END
+        CFG_START + "\n    CFG = " + pprint.pformat(cfg_values, sort_dicts=True) + "\n" + CFG_END
     )
     prompts_block = (
         PROMPTS_START + "\n    EVAL_PROMPTS = " + repr(list(prompts)) + "\n" + PROMPTS_END
     )
-    if any(m in cfg_block for m in (PROMPTS_START, PROMPTS_END)):
+    data_block = (
+        DATA_START + "\n    DATA = " + pprint.pformat(dataset, sort_dicts=True) + "\n" + DATA_END
+    )
+    if any(m in cfg_block for m in (PROMPTS_START, PROMPTS_END, DATA_START, DATA_END)):
         raise ValueError("config values may not contain template markers")
-    if any(m in prompts_block for m in (CFG_START, CFG_END)):
+    if any(m in prompts_block for m in (CFG_START, CFG_END, DATA_START, DATA_END)):
         raise ValueError("prompts may not contain template markers")
+    if any(m in data_block for m in (CFG_START, CFG_END, PROMPTS_START, PROMPTS_END)):
+        raise ValueError("dataset values may not contain template markers")
     text = _swap(text, CFG_START, CFG_END, cfg_block)
     text = _swap(text, PROMPTS_START, PROMPTS_END, prompts_block)
+    text = _swap(text, DATA_START, DATA_END, data_block)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
     path = out_dir / f"attempt_{stamp}.py"

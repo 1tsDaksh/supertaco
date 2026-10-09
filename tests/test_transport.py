@@ -12,6 +12,8 @@ from supertaco.errors import ConfigurationError
 from supertaco.gpu.transport import (
     CFG_END,
     CFG_START,
+    DATA_END,
+    DATA_START,
     MODEL_WHITELIST,
     ColabTransport,
     render_script,
@@ -176,3 +178,83 @@ def test_template_has_data_region_and_dual_loader():
     assert text.count("# >>> SUPER_TACO_DATA >>>") == 1
     assert text.count("# <<< SUPER_TACO_DATA <<<") == 1
     assert text.index("# >>> SUPER_TACO_DATA >>>") < text.index('DATA.get("kind")')
+
+
+def test_render_script_embeds_data_and_strips_it_from_cfg(tmp_path):
+    cfg = {
+        "model": "Qwen/Qwen2.5-0.5B-Instruct",
+        "learning_rate": 2e-4,
+        "dataset": {
+            "kind": "synthetic",
+            "rows": [{"instruction": "a", "input": "", "output": "b"}],
+        },
+    }
+    out = render_script(cfg, ["p"], TEMPLATE, tmp_path)
+    text = out.read_text(encoding="utf-8")
+    data_block = text.split(DATA_START, 1)[1].split(DATA_END, 1)[0]
+    rendered = ast.literal_eval(data_block.split("DATA = ", 1)[1].strip())
+    assert rendered["kind"] == "synthetic"
+    assert len(rendered["rows"]) == 1
+    cfg_block = text.split(CFG_START, 1)[1].split(CFG_END, 1)[0]
+    assert "dataset" not in cfg_block  # rows never double-embed into CFG
+    assert "eval_prompts" not in cfg_block
+    py_compile.compile(str(out), doraise=True)
+
+
+def test_render_without_dataset_key_uses_alpaca_default(tmp_path):
+    cfg = {"model": "Qwen/Qwen2.5-0.5B-Instruct", "learning_rate": 2e-4}
+    out = render_script(cfg, ["p"], TEMPLATE, tmp_path)
+    text = out.read_text(encoding="utf-8")
+    data_block = text.split(DATA_START, 1)[1].split(DATA_END, 1)[0]
+    rendered = ast.literal_eval(data_block.split("DATA = ", 1)[1].strip())
+    assert rendered == {
+        "kind": "hf",
+        "hf_id": "yahma/alpaca-cleaned",
+        "max_rows": 256,
+        "rows": None,
+    }
+
+
+def test_render_synthetic_without_rows_falls_back_to_alpaca(tmp_path):
+    cfg = {
+        "model": "Qwen/Qwen2.5-0.5B-Instruct",
+        "learning_rate": 2e-4,
+        "dataset": {"kind": "synthetic"},
+    }
+    out = render_script(cfg, ["p"], TEMPLATE, tmp_path)
+    text = out.read_text(encoding="utf-8")
+    data_block = text.split(DATA_START, 1)[1].split(DATA_END, 1)[0]
+    rendered = ast.literal_eval(data_block.split("DATA = ", 1)[1].strip())
+    assert rendered["kind"] == "hf"
+    assert rendered["hf_id"] == "yahma/alpaca-cleaned"
+    assert rendered.get("note")
+
+
+def test_render_rows_without_kind_defaults_to_synthetic(tmp_path):
+    cfg = {
+        "model": "Qwen/Qwen2.5-0.5B-Instruct",
+        "learning_rate": 2e-4,
+        "dataset": {"rows": [{"instruction": "a", "input": "", "output": "b"}]},
+    }
+    out = render_script(cfg, ["p"], TEMPLATE, tmp_path)
+    text = out.read_text(encoding="utf-8")
+    data_block = text.split(DATA_START, 1)[1].split(DATA_END, 1)[0]
+    rendered = ast.literal_eval(data_block.split("DATA = ", 1)[1].strip())
+    assert rendered["kind"] == "synthetic"
+    assert len(rendered["rows"]) == 1
+
+
+def test_data_value_containing_markers_rejected(tmp_path):
+    cfg = {
+        "model": "Qwen/Qwen2.5-0.5B-Instruct",
+        "learning_rate": 2e-4,
+        "dataset": {"kind": "hf", "hf_id": "# >>> SUPER_TACO_CFG >>>"},
+    }
+    with pytest.raises(ValueError, match="template markers"):
+        render_script(cfg, ["x"], TEMPLATE, tmp_path)
+
+
+def test_non_mapping_dataset_rejected(tmp_path):
+    cfg = {"model": "Qwen/Qwen2.5-0.5B-Instruct", "learning_rate": 2e-4, "dataset": ["oops"]}
+    with pytest.raises(ValueError, match="dataset must be a mapping"):
+        render_script(cfg, ["x"], TEMPLATE, tmp_path)
