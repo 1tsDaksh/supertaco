@@ -64,3 +64,39 @@ def test_jsonl_write_failure_never_kills_run(monkeypatch, tmp_path):
     text = client.classify_failure("x")
     assert text == "1"
     assert client.call_log[-1].get("jsonl_written") is False
+
+
+def test_plan_goal_prompt_and_return(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    client = _client()
+    seen = {}
+
+    def fake(self, model_id, prompt, max_tokens, temperature):
+        seen["model_id"] = model_id
+        seen["prompt"] = prompt
+        return '{"model": "qwen2.5-0.5b"}', 10
+
+    monkeypatch.setattr(NemotronClient, "_http_call", fake)
+    text = client.plan_goal("pirate chef")
+    assert '"model": "qwen2.5-0.5b"' in text
+    assert seen["model_id"] == "nvidia/nemotron-3-super-120b-a12b"
+    assert "pirate chef" in seen["prompt"]
+    assert "eval_prompts" in seen["prompt"]
+    assert client.call_log[-1]["mode"] == "real"
+
+
+def test_generate_rows_prompt_and_return(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    client = _client()
+    seen = {}
+
+    def fake(self, model_id, prompt, max_tokens, temperature):
+        seen["prompt"] = prompt
+        return '[{"instruction": "x", "input": "", "output": "y"}]', 10
+
+    monkeypatch.setattr(NemotronClient, "_http_call", fake)
+    text = client.generate_rows("goal", 5, ["old one"])
+    assert json.loads(text) == [{"instruction": "x", "input": "", "output": "y"}]
+    assert "exactly 5" in seen["prompt"]
+    assert "old one" in seen["prompt"]
+    assert client.call_log[-1]["model_key"] == "patch"

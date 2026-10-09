@@ -213,6 +213,36 @@ May include Tavily doc lookup recommendations."""
         except (json.JSONDecodeError,):
             return {"novel_error": True, "suggestion": result.strip()}
 
+    def plan_goal(self, goal: str) -> str:
+        """Ask the super model to turn a free-text goal into a run-plan JSON object."""
+        prompt = f"""You are a fine-tuning planner. Given the user's goal, return ONE JSON \
+object with exactly these keys:
+"model" (one of: qwen2.5-0.5b, qwen2.5-1.5b, qwen2.5-3b, tinyllama-1.1b),
+"learning_rate", "batch_size", "lora_r", "lora_alpha", "lora_dropout", "num_epochs",
+"dataset" (object: {{"kind": "synthetic"}} when training rows should be written from the goal,
+or {{"kind": "hf", "id": "<huggingface-dataset-id>", "rows": <int>}} when the goal names a \
+public dataset),
+"eval_prompts" (a JSON array of exactly 5 strings, each testing a skill the goal requires).
+
+User goal: {goal}
+
+Return ONLY the JSON object. No prose, no markdown."""
+        return self._call("patch", prompt)
+
+    def generate_rows(self, goal: str, count: int, banned: list[str]) -> str:
+        """Generate alpaca-shaped training rows for a goal with the super model."""
+        prompt = f"""Write exactly {count} supervised fine-tuning examples for the goal below.
+Each example is a JSON object: {{"instruction": "...", "input": "", "output": "..."}}.
+Rules:
+- instruction: a realistic user request (1-2 sentences), <= 120 characters
+- output: a high-quality answer in the style the goal implies, <= 400 characters
+- diverse phrasings; never repeat an instruction from this list: {list(banned[:25])}
+
+Goal: {goal}
+
+Return ONLY a JSON array of objects. No prose, no markdown."""
+        return self._call("patch", prompt)
+
     def log_call(self, model_key: str, tokens: int, latency: float, escalation_reason: str = None):
         """Log an LLM call for audit and cost tracking."""
         self.call_log.append(
