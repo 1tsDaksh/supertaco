@@ -221,3 +221,66 @@ def test_invalid_model_blocked_before_launch(app, monkeypatch):
     assert not app.exception, [e.value for e in app.exception]
     assert any("T4-viable" in e.value for e in app.error)
     assert transport.calls == 0
+
+
+class PlanFakeLLM(FakeLLM):
+    """Judge behavior from FakeLLM plus planner/generation fakes."""
+
+    def __init__(self):
+        super().__init__()
+        self._row_n = 0
+
+    def plan_goal(self, goal):
+        return json.dumps(
+            {
+                "model": "qwen2.5-1.5b",
+                "learning_rate": 5e-4,
+                "batch_size": 8,
+                "lora_r": 16,
+                "lora_alpha": 32,
+                "lora_dropout": 0.1,
+                "num_epochs": 2,
+                "dataset": {"kind": "synthetic"},
+                "eval_prompts": ["gp1", "gp2", "gp3", "gp4", "gp5"],
+            }
+        )
+
+    def generate_rows(self, goal, count, banned):
+        start = self._row_n
+        rows = [
+            {"instruction": f"pirate request {n}", "input": "", "output": f"arr {n}"}
+            for n in range(start, start + count)
+        ]
+        self._row_n = start + count
+        return json.dumps(rows)
+
+
+def test_goal_plan_then_run_threads_dataset_and_prompts(app, monkeypatch):
+    class Recorder(FakeTransport):
+        def run_attempt(self, config, prompts, on_line=None):
+            self.prompts = list(prompts)
+            return super().run_attempt(config, prompts, on_line)
+
+    transport = Recorder([(HEALTHY_LOG, "ok", None)])
+    _patch_run(monkeypatch, transport, PlanFakeLLM())
+
+    goal_box = next(ta for ta in app.text_area if "model learn" in ta.label)
+    goal_box.set_value("answer like a pirate chef").run()
+    next(b for b in app.button if "Plan with Nemotron" in b.label).click().run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert any("Plan ready" in s.value for s in app.success)
+    assert app.session_state["plan_dataset"]["kind"] == "synthetic"
+    assert len(app.session_state["plan_dataset"]["rows"]) == 150
+    assert app.session_state["plan_prompts"] == ["gp1", "gp2", "gp3", "gp4", "gp5"]
+    assert app.session_state["config"]["model"] == "qwen2.5-1.5b"
+    assert app.session_state["knobs"]["learning_rate"] == pytest.approx(5e-4)
+
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    seen = transport.last_config
+    assert seen["dataset"]["kind"] == "synthetic"
+    assert len(seen["dataset"]["rows"]) == 150
+    assert seen["learning_rate"] == pytest.approx(5e-4)  # plan knobs survive the overlay
+    assert seen["model"] == "qwen2.5-1.5b"
+    assert transport.prompts == ["gp1", "gp2", "gp3", "gp4", "gp5"]
+    assert app.session_state["run_result"].success is True

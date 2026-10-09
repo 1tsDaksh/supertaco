@@ -17,6 +17,7 @@ import yaml
 
 from supertaco.errors import ConfigurationError
 from supertaco.loop import Event, extract_loss_points, make_llm, run_training_loop
+from supertaco.planner import materialize_dataset, plan_run, plan_to_config
 
 
 # ─── Load settings directly from .env (no package import needed) ────────────
@@ -205,6 +206,48 @@ def render_config_editor(config: dict) -> dict:
     return parsed
 
 
+def render_goal_panel() -> None:
+    """Goal textarea -> Nemotron plan (config, dataset, eval prompts) -> session state (G7)."""
+    st.markdown("### 🎯 Goal")
+    goal = st.text_area(
+        "What should the model learn?",
+        height=80,
+        key="goal_text",
+        placeholder="e.g. Answer like a pirate chef: warm, nautical, precise about cooking times",
+    )
+    if not st.button("✨ Plan with Nemotron", use_container_width=True):
+        return
+    if not goal.strip():
+        st.warning("Enter a goal first.")
+        return
+    with st.spinner("Nemotron is drafting your run plan..."):
+        llm = make_llm()
+        plan = materialize_dataset(plan_run(goal, llm), goal, llm)
+    st.session_state["plan_dataset"] = plan.dataset.model_dump(exclude_none=True)
+    st.session_state["plan_prompts"] = list(plan.eval_prompts)
+    cfg = plan_to_config(plan)
+    from supertaco.gpu.transport import MODEL_WHITELIST
+
+    # Planner canonicalizes to HF ids; the dashboard's config convention is
+    # whitelist keys (selectbox options, configs/defaults/colab_t4.yaml).
+    cfg["model"] = next((k for k, v in MODEL_WHITELIST.items() if v == cfg["model"]), cfg["model"])
+    st.session_state["config"] = {k: v for k, v in cfg.items() if k != "dataset"}
+    st.session_state["knobs"] = {
+        "learning_rate": plan.learning_rate,
+        "batch_size": plan.batch_size,
+        "lora_r": plan.lora_r,
+        "lora_alpha": plan.lora_alpha,
+        "num_epochs": plan.num_epochs,
+    }
+    if plan.plan_mode == "fallback":
+        st.warning(
+            "Planner fell back to shipped defaults (Nemotron reply unparseable) - "
+            "review everything before running."
+        )
+    else:
+        st.success("Plan ready - review config, dataset and eval prompts, then Run.")
+
+
 def render_report() -> None:
     """Full attempt ledger + judge table + final config + artifact (spec D5)."""
     st.markdown("### 📋 Training Report")
@@ -367,7 +410,7 @@ def _llm_rows(calls: list) -> list:
     ]
 
 
-def execute_launch(config, max_retries, timeline_slot, logs_slot, chart_slot):
+def execute_launch(config, max_retries, timeline_slot, logs_slot, chart_slot, prompts=None):
     """Run the real loop, streaming events + live loss into the placeholders."""
     from supertaco.gpu.transport import ColabTransport
 
@@ -399,6 +442,7 @@ def execute_launch(config, max_retries, timeline_slot, logs_slot, chart_slot):
         llm=make_llm(),
         max_retries=max_retries,
         runs_dir="configs/runs",
+        prompts=prompts,
     )
     return events, result
 
@@ -425,23 +469,42 @@ def _gpu_figure(loss_points: list):
 # ─── Main App ─────────────────────────────────────────────────────
 def main():
     init_session2()
-    render_sidebar()
 
-    st.title("🚀 SuperTune — AI-supervised fine-tuning sandbox")
+    st.title("🚀 SuperTaco — AI-supervised fine-tuning sandbox")
     st.caption(
-        "Submit a dataset + goal → agent writes config → launches on Nebius → "
-        "monitors → auto-heals failures → evaluates → deploys endpoint"
+        "Type a goal → Nemotron plans config, data and eval prompts → you review → "
+        "free Colab T4 → self-healing loop → Nemotron judge before/after"
     )
+    render_goal_panel()
+    render_sidebar()
 
     # ── Left Column: Job Launcher ──────────────────────────────────
     with st.container(border=True):
         st.markdown("### 🚦 Fine-tune on Colab")
         cfg = render_config_editor(st.session_state["config"])
+        ds = st.session_state.get("plan_dataset")
+        if ds:
+            if ds.get("kind") == "synthetic":
+                label = f"synthetic - {len(ds.get('rows') or [])} generated rows"
+            else:
+                label = f"huggingface - {ds.get('hf_id')} ({ds.get('max_rows')} rows)"
+            if ds.get("note"):
+                label += f" | {ds['note']}"
+            st.caption(f"Dataset: {label}")
+        if st.session_state.get("plan_prompts"):
+            edited_prompts = st.text_area(
+                "Eval prompts (one per line - the Nemotron judge scores these)",
+                value="\n".join(st.session_state["plan_prompts"]),
+                height=110,
+            )
+            st.session_state["plan_prompts"] = [p for p in edited_prompts.splitlines() if p.strip()]
         knobs = st.session_state.get("knobs") or {}
         model_sel = st.session_state.get("model_sel")
         cfg_for_run = {**cfg, **knobs}
         if model_sel:
             cfg_for_run["model"] = model_sel
+        if st.session_state.get("plan_dataset"):
+            cfg_for_run["dataset"] = dict(st.session_state["plan_dataset"])
         run_clicked = st.button(
             "🚀 Fine-tune on Colab (supervisor loop)", type="primary", use_container_width=True
         )
@@ -465,6 +528,7 @@ def main():
                     timeline_slot,
                     logs_slot,
                     chart_slot,
+                    prompts=st.session_state.get("plan_prompts") or None,
                 )
                 st.session_state["events"] = events
                 st.session_state["run_result"] = result
