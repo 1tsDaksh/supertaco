@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
 from supertaco.data import generate_dataset
 from supertaco.errors import ConfigurationError
-from supertaco.eval.harness import DEFAULT_PROMPTS
+from supertaco.eval.harness import DEFAULT_PROMPTS, PROMPT_SUITE_SIZE
 from supertaco.gpu.transport import resolve_model
 
 
@@ -57,6 +58,9 @@ def _extract_json(text: str) -> dict:
 
 
 def _dataset_spec(raw: object) -> DatasetSpec:
+    """Map the planner's dataset blob (key `id`, int `rows`) to DatasetSpec
+    (`hf_id`, `max_rows`).
+    """
     if not isinstance(raw, dict):
         raise ValueError("dataset must be an object")
     if raw.get("kind") == "hf":
@@ -70,13 +74,18 @@ def _dataset_spec(raw: object) -> DatasetSpec:
     return DatasetSpec(kind="synthetic")
 
 
+def _finite(value: float, fallback: float) -> float:
+    """Replace NaN/inf with a safe default before clamping (G10)."""
+    return value if math.isfinite(value) else fallback
+
+
 def _clamp(plan: RunPlan) -> None:
     """G10: keep planner values inside T4-safe ranges."""
-    plan.learning_rate = min(max(plan.learning_rate, 1e-5), 1e-3)
+    plan.learning_rate = min(max(_finite(plan.learning_rate, 2e-4), 1e-5), 1e-3)
     plan.batch_size = min(max(plan.batch_size, 1), 16)
     plan.lora_r = min(max(plan.lora_r, 4), 32)
     plan.lora_alpha = min(max(plan.lora_alpha, 8), 64)
-    plan.lora_dropout = min(max(plan.lora_dropout, 0.0), 0.3)
+    plan.lora_dropout = min(max(_finite(plan.lora_dropout, 0.05), 0.0), 0.3)
     plan.num_epochs = min(max(plan.num_epochs, 1), 3)
 
 
@@ -89,7 +98,9 @@ def _validate_model(plan: RunPlan) -> None:
 
 def _validate_prompts(plan: RunPlan) -> None:
     prompts = plan.eval_prompts
-    if len(prompts) != 5 or not all(isinstance(p, str) and p.strip() for p in prompts):
+    if len(prompts) != PROMPT_SUITE_SIZE or not all(
+        isinstance(p, str) and p.strip() for p in prompts
+    ):
         plan.eval_prompts = list(DEFAULT_PROMPTS)
 
 

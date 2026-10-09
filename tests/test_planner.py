@@ -128,3 +128,60 @@ def test_materialize_dataset_falls_back_to_alpaca_when_empty():
     assert plan.dataset.kind == "hf"
     assert plan.dataset.hf_id == "yahma/alpaca-cleaned"
     assert plan.dataset.note and "fell back" in plan.dataset.note
+
+
+def test_plan_run_clamps_non_finite_floats():
+    plan = plan_run(
+        "x", _LLM(json.dumps(dict(GOOD, learning_rate=float("nan"), lora_dropout=float("inf"))))
+    )
+    assert plan.plan_mode == "real"
+    assert plan.learning_rate == pytest.approx(2e-4)
+    assert plan.lora_dropout == pytest.approx(0.05)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("learning_rate", 1e-7, 1e-5),
+        ("learning_rate", 9.0, 1e-3),
+        ("batch_size", 0, 1),
+        ("batch_size", 64, 16),
+        ("lora_r", 1, 4),
+        ("lora_r", 128, 32),
+        ("lora_alpha", 1, 8),
+        ("lora_alpha", 999, 64),
+        ("num_epochs", 0, 1),
+        ("num_epochs", 42, 3),
+    ],
+)
+def test_plan_run_clamps_both_bounds(field, value, expected):
+    plan = plan_run("x", _LLM(json.dumps(dict(GOOD, **{field: value}))))
+    assert getattr(plan, field) == pytest.approx(expected)
+
+
+def test_plan_run_clamps_dropout_bounds():
+    low = plan_run("x", _LLM(json.dumps(dict(GOOD, lora_dropout=-1.0))))
+    assert low.lora_dropout == 0.0
+    high = plan_run("x", _LLM(json.dumps(dict(GOOD, lora_dropout=0.9))))
+    assert high.lora_dropout == 0.3
+
+
+def test_plan_run_clamps_hf_rows_edges():
+    low = plan_run(
+        "x", _LLM(json.dumps(dict(GOOD, dataset={"kind": "hf", "id": "squad", "rows": 3})))
+    )
+    high = plan_run(
+        "x", _LLM(json.dumps(dict(GOOD, dataset={"kind": "hf", "id": "squad", "rows": 10000})))
+    )
+    assert low.dataset.max_rows == 50
+    assert high.dataset.max_rows == 512
+
+
+def test_plan_run_blank_prompt_strings_fall_back_to_defaults():
+    plan = plan_run("x", _LLM(json.dumps(dict(GOOD, eval_prompts=[""] * 5))))
+    assert plan.eval_prompts == DEFAULT_PROMPTS
+
+
+def test_plan_run_unknown_dataset_kind_becomes_synthetic():
+    plan = plan_run("x", _LLM(json.dumps(dict(GOOD, dataset={"kind": "csv"}))))
+    assert plan.dataset.kind == "synthetic"
