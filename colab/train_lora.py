@@ -63,6 +63,9 @@ def main() -> None:
         "Give one reason eval scores can regress after training.",
     ]
     # <<< SUPER_TACO_PROMPTS <<<
+    # >>> SUPER_TACO_DATA >>>
+    DATA = {"hf_id": "yahma/alpaca-cleaned", "kind": "hf", "max_rows": 256, "rows": None}
+    # <<< SUPER_TACO_DATA <<<
     print("config:", CFG, flush=True)
 
     assert torch.cuda.is_available(), "no GPU on the Colab VM"
@@ -80,8 +83,12 @@ def main() -> None:
             ]
         }
 
-    ds = datasets.load_dataset("yahma/alpaca-cleaned", split="train")
-    ds = ds.select(range(CFG.get("max_rows", 256))).map(to_messages)
+    if DATA.get("kind") == "hf":
+        ds = datasets.load_dataset(DATA.get("hf_id") or "yahma/alpaca-cleaned", split="train")
+        ds = ds.select(range(min(DATA.get("max_rows", 256), len(ds))))
+    else:
+        ds = datasets.Dataset.from_list(DATA.get("rows") or [])
+    ds = ds.map(to_messages)
 
     tokenizer = AutoTokenizer.from_pretrained(CFG["model"])
     if tokenizer.pad_token is None:

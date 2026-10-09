@@ -161,3 +161,14 @@ def test_template_contains_phase2_generation_and_block(tmp_path):
     assert text.index("with model.disable_adapter():") < text.index("base_answers[p] = _gen(t)")
     assert '"base": base_answers' in text
     assert '"fine_tuned": ft_answers' in text
+
+
+def test_template_has_data_region_and_dual_loader():
+    text = TEMPLATE.read_text(encoding="utf-8")
+    assert "# >>> SUPER_TACO_DATA >>>" in text
+    assert "# <<< SUPER_TACO_DATA <<<" in text
+    assert 'DATA.get("kind") == "hf"' in text
+    assert "datasets.Dataset.from_list" in text
+    assert "yahma/alpaca-cleaned" in text
+    # region stays inside main(), before the eval-response block
+    assert text.index("# >>> SUPER_TACO_DATA >>>") < text.index("###RESPONSES_JSON###")
