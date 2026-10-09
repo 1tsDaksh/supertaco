@@ -562,3 +562,17 @@ def test_custom_prompts_flow_to_transport_default_unchanged():
 
     run_training_loop(cfg, transport=T(), llm=FakeLLM(), max_retries=0, runs_dir=_tmp_runs())
     assert seen[1] == DEFAULT_PROMPTS  # default path unchanged
+
+
+def test_custom_prompts_reach_the_judge():
+    transport = FakeTransport([lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts))])
+    res = run_training_loop(
+        {"model": "qwen2.5-0.5b", "learning_rate": 2e-4},
+        transport=transport,
+        llm=FakeLLM(),
+        max_retries=0,
+        runs_dir=_tmp_runs(),
+        prompts=["goal prompt one"],
+    )
+    assert res.success is True
+    assert res.eval_results["prompts"] == ["goal prompt one"]
