@@ -65,6 +65,10 @@ cp .env.example .env    # set NEBIUS_API_KEY (judge + classifier calls)
 # (free GPU, ~10-15 min; spends judge tokens - ask first)
 supertaco run configs/defaults/colab_t4.yaml
 
+# Optional: plan a run from a free-text goal, review the yaml, then run it
+supertaco plan "answer like a pirate chef"
+supertaco run configs/runs/plan_<ts>.yaml
+
 # Dashboard: config editor, live timeline + loss chart, attempt-ledger report
 streamlit run supertaco/ui/dashboard.py --server.headless true --server.port 8510
 ```
@@ -89,6 +93,21 @@ chat_template: llama-3
   `colab/output/`.
 - `configs/base/` is reference-only - never modify it.
 - Models outside the T4 whitelist are rejected before any GPU is provisioned.
+
+## Goal-driven runs
+
+Instead of the static config, describe what you want the model to learn:
+
+- **Dashboard:** type a goal → **Plan with Nemotron** → review/edit the config knobs, the
+  dataset source (synthetic ~150 generated rows, or a named Hugging Face dataset) and the 5
+  domain eval prompts → **Run**.
+- **CLI:** `supertaco plan "answer like a pirate chef"` writes a reviewable
+  `configs/runs/plan_<ts>.yaml`; inspect it, then
+  `supertaco run configs/runs/plan_<ts>.yaml`.
+
+The planner is a single Nemotron (super) call; unparseable replies fall back to the shipped
+defaults (flagged as `fallback` in the plan and the dashboard). Values are clamped to T4-safe
+ranges, models must be on the whitelist, and the judge suite stays at exactly 5 prompts.
 
 ## Nemotron / Token Factory usage
 
