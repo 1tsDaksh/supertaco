@@ -16,6 +16,7 @@ import streamlit as st
 import yaml
 
 from supertaco.errors import ConfigurationError
+from supertaco.eval.harness import PROMPT_SUITE_SIZE
 from supertaco.loop import Event, extract_loss_points, make_llm, run_training_loop
 from supertaco.planner import materialize_dataset, plan_run, plan_to_config
 
@@ -491,13 +492,21 @@ def main():
             if ds.get("note"):
                 label += f" | {ds['note']}"
             st.caption(f"Dataset: {label}")
-        if st.session_state.get("plan_prompts"):
+        if "plan_prompts" in st.session_state:
             edited_prompts = st.text_area(
                 "Eval prompts (one per line - the Nemotron judge scores these)",
                 value="\n".join(st.session_state["plan_prompts"]),
                 height=110,
             )
             st.session_state["plan_prompts"] = [p for p in edited_prompts.splitlines() if p.strip()]
+            n_prompts = len(st.session_state["plan_prompts"])
+            if n_prompts == 0:
+                st.caption("Prompts cleared - the judge will use the default 5-prompt suite.")
+            elif n_prompts != PROMPT_SUITE_SIZE:
+                st.warning(
+                    f"Expected exactly {PROMPT_SUITE_SIZE} eval prompts ({n_prompts} submitted) "
+                    f"- the judge scores at most {PROMPT_SUITE_SIZE}."
+                )
         knobs = st.session_state.get("knobs") or {}
         model_sel = st.session_state.get("model_sel")
         cfg_for_run = {**cfg, **knobs}

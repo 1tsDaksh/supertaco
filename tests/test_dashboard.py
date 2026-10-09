@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from supertaco.eval.harness import RESPONSES_END, RESPONSES_START
+from supertaco.eval.harness import DEFAULT_PROMPTS, RESPONSES_END, RESPONSES_START
 
 REPO = Path(__file__).resolve().parents[1]
 DASHBOARD = REPO / "supertaco" / "ui" / "dashboard.py"
@@ -284,3 +284,43 @@ def test_goal_plan_then_run_threads_dataset_and_prompts(app, monkeypatch):
     assert seen["model"] == "qwen2.5-1.5b"
     assert transport.prompts == ["gp1", "gp2", "gp3", "gp4", "gp5"]
     assert app.session_state["run_result"].success is True
+
+
+def test_prompts_editor_labels_wrong_counts(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), PlanFakeLLM())
+    goal_box = next(ta for ta in app.text_area if "model learn" in ta.label)
+    goal_box.set_value("g").run()
+    next(b for b in app.button if "Plan with Nemotron" in b.label).click().run()
+    assert not app.exception, [e.value for e in app.exception]
+
+    editor = next(ta for ta in app.text_area if "Eval prompts" in ta.label)
+    editor.set_value("p1\np2\np3\np4\np5\np6").run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert any("Expected exactly 5" in w.value for w in app.warning)
+    assert app.session_state["plan_prompts"] == ["p1", "p2", "p3", "p4", "p5", "p6"]
+
+    # The write-back above changed session content, so the editor's value-derived
+    # element id shifts on the next run - re-render once so set_value("") below
+    # targets the id the following run will actually compute.
+    app.run()
+    editor = next(ta for ta in app.text_area if "Eval prompts" in ta.label)
+    editor.set_value("").run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert app.session_state["plan_prompts"] == []
+    assert any("Prompts cleared" in c.value for c in app.caption)
+    # editor stays recoverable after clearing
+    assert any("Eval prompts" in ta.label for ta in app.text_area)
+
+
+def test_plan_fallback_shows_warning(app, monkeypatch):
+    class FallbackLLM(PlanFakeLLM):
+        def plan_goal(self, goal):
+            return "I cannot help with that."
+
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FallbackLLM())
+    goal_box = next(ta for ta in app.text_area if "model learn" in ta.label)
+    goal_box.set_value("g").run()
+    next(b for b in app.button if "Plan with Nemotron" in b.label).click().run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert any("fell back" in w.value for w in app.warning)
+    assert app.session_state["plan_prompts"] == DEFAULT_PROMPTS
