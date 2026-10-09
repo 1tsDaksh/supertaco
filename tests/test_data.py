@@ -60,3 +60,21 @@ def test_generate_dataset_filters_junk_rows():
     )
     rows = generate_dataset("g", llm, target=1, chunk=10, floor=1, max_calls=1)
     assert [r["instruction"] for r in rows] == ["good one"]
+
+
+def test_generate_dataset_garbage_reply_returns_empty():
+    class Garbage:
+        def generate_rows(self, goal, count, banned):
+            return "I cannot help with that."
+
+    rows = generate_dataset("g", Garbage(), target=150, floor=100, max_calls=3)
+    assert rows == []
+
+
+def test_generate_dataset_never_raises_when_llm_raises():
+    class Boom:
+        def generate_rows(self, goal, count, banned):
+            raise RuntimeError("token factory down")
+
+    rows = generate_dataset("g", Boom(), target=150, floor=100, max_calls=3)
+    assert rows == []

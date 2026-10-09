@@ -55,6 +55,9 @@ def generate_dataset(
         try:
             batch = _extract_array(llm.generate_rows(goal, count, banned))
         except Exception:
+            # G8: any generation/parse failure ends chunking; the floor check
+            # below decides between returning partial rows or [] so the caller
+            # can fall back to the alpaca slice (never raises).
             break
         for rec in batch:
             row = _clean_row(rec)
