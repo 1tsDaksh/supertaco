@@ -219,7 +219,7 @@ def test_render_synthetic_without_rows_falls_back_to_alpaca(tmp_path):
     cfg = {
         "model": "Qwen/Qwen2.5-0.5B-Instruct",
         "learning_rate": 2e-4,
-        "dataset": {"kind": "synthetic"},
+        "dataset": {"kind": "synthetic", "max_rows": 100},
     }
     out = render_script(cfg, ["p"], TEMPLATE, tmp_path)
     text = out.read_text(encoding="utf-8")
@@ -227,6 +227,7 @@ def test_render_synthetic_without_rows_falls_back_to_alpaca(tmp_path):
     rendered = ast.literal_eval(data_block.split("DATA = ", 1)[1].strip())
     assert rendered["kind"] == "hf"
     assert rendered["hf_id"] == "yahma/alpaca-cleaned"
+    assert rendered["max_rows"] == 100
     assert rendered.get("note")
 
 
@@ -257,4 +258,20 @@ def test_data_value_containing_markers_rejected(tmp_path):
 def test_non_mapping_dataset_rejected(tmp_path):
     cfg = {"model": "Qwen/Qwen2.5-0.5B-Instruct", "learning_rate": 2e-4, "dataset": ["oops"]}
     with pytest.raises(ValueError, match="dataset must be a mapping"):
+        render_script(cfg, ["x"], TEMPLATE, tmp_path)
+
+
+def test_prompt_containing_markers_rejected(tmp_path):
+    cfg = {"model": "Qwen/Qwen2.5-0.5B-Instruct", "learning_rate": 2e-4}
+    with pytest.raises(ValueError, match="template markers"):
+        render_script(cfg, ["# >>> SUPER_TACO_DATA >>>"], TEMPLATE, tmp_path)
+
+
+def test_non_list_rows_rejected(tmp_path):
+    cfg = {
+        "model": "Qwen/Qwen2.5-0.5B-Instruct",
+        "learning_rate": 2e-4,
+        "dataset": {"kind": "synthetic", "rows": "notalist"},
+    }
+    with pytest.raises(ValueError, match="dataset rows must be"):
         render_script(cfg, ["x"], TEMPLATE, tmp_path)

@@ -65,9 +65,17 @@ def render_script(config: dict, prompts: list[str], template: Path, out_dir: Pat
     dataset = {**ALPACA_DEFAULT, **raw}
     if dataset.get("kind") != "hf" and not dataset.get("rows"):
         dataset = {
-            **ALPACA_DEFAULT,
+            **dataset,
+            "kind": "hf",
+            "hf_id": ALPACA_DEFAULT["hf_id"],
+            "rows": None,
             "note": "synthetic plan had no materialized rows; fell back to the alpaca slice",
         }
+    rows = dataset.get("rows")
+    if rows is not None and (
+        not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows)
+    ):
+        raise ValueError("dataset rows must be a list of dicts")
     cfg_block = (
         CFG_START + "\n    CFG = " + pprint.pformat(cfg_values, sort_dicts=True) + "\n" + CFG_END
     )
