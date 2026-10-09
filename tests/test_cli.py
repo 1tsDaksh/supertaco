@@ -30,9 +30,11 @@ class FakeTransport:
         self.logs = logs
         self.error = error
         self.calls = 0
+        self.prompts = None
 
     def run_attempt(self, config, prompts, on_line=None):
         self.calls += 1
+        self.prompts = prompts
         text = self.logs
         if self.error is None:
             text += _responses_block(prompts)
@@ -136,3 +138,75 @@ def test_non_mapping_config_exits_one(tmp_path, monkeypatch, capsys):
         cli.run_config(str(bad), llm=FakeLLM())
     assert exc.value.code == 1
     assert "mapping" in capsys.readouterr().out
+
+
+class PlanLLM:
+    """Planner fake: valid synthetic plan + deterministic rows."""
+
+    call_log = []
+
+    def __init__(self):
+        self.n = 0
+
+    def plan_goal(self, goal):
+        return json.dumps(
+            {
+                "model": "qwen2.5-0.5b",
+                "learning_rate": 2e-4,
+                "batch_size": 4,
+                "lora_r": 8,
+                "lora_alpha": 16,
+                "lora_dropout": 0.05,
+                "num_epochs": 1,
+                "dataset": {"kind": "synthetic"},
+                "eval_prompts": ["gp1", "gp2", "gp3", "gp4", "gp5"],
+            }
+        )
+
+    def generate_rows(self, goal, count, banned):
+        start = self.n
+        rows = [
+            {"instruction": f"pirate request {n}", "input": "", "output": f"arr {n}"}
+            for n in range(start, start + count)
+        ]
+        self.n = start + count
+        return json.dumps(rows)
+
+
+def test_plan_command_writes_plan_yaml(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    cli.plan_goal_command("pirate chef", llm=PlanLLM())
+    out = capsys.readouterr().out
+    assert "Plan written:" in out
+    assert "synthetic" in out
+    plans = list((tmp_path / "configs" / "runs").glob("plan_*.yaml"))
+    assert len(plans) == 1
+    data = yaml.safe_load(plans[0].read_text(encoding="utf-8"))
+    assert data["goal"] == "pirate chef"
+    assert data["dataset"]["kind"] == "synthetic"
+    assert len(data["dataset"]["rows"]) == 150
+    assert data["eval_prompts"] == ["gp1", "gp2", "gp3", "gp4", "gp5"]
+    assert "supertaco run" in out
+
+
+def test_main_plan_subcommand_wires_through(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "make_llm", lambda: PlanLLM())
+    cli.main(["plan", "pirate chef"])
+    assert "Plan written:" in capsys.readouterr().out
+    assert list((tmp_path / "configs" / "runs").glob("plan_*.yaml"))
+
+
+def test_run_config_passes_eval_prompts_to_loop(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    transport = FakeTransport()
+    monkeypatch.setattr(cli, "_make_transport", lambda: transport)
+    cfg = {
+        "model": "qwen2.5-0.5b",
+        "learning_rate": 2e-4,
+        "eval_prompts": ["only goal prompt"],
+    }
+    path = tmp_path / "planish.yaml"
+    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    cli.run_config(str(path), llm=FakeLLM())
+    assert transport.prompts == ["only goal prompt"]
