@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 from supertaco import cli
-from supertaco.eval.harness import RESPONSES_END, RESPONSES_START
+from supertaco.eval.harness import DEFAULT_PROMPTS, RESPONSES_END, RESPONSES_START
 from supertaco.loop import AttemptResult
 
 HEALTHY_LOG = (
@@ -31,10 +31,12 @@ class FakeTransport:
         self.error = error
         self.calls = 0
         self.prompts = None
+        self.last_config = None
 
     def run_attempt(self, config, prompts, on_line=None):
         self.calls += 1
         self.prompts = prompts
+        self.last_config = dict(config)
         text = self.logs
         if self.error is None:
             text += _responses_block(prompts)
@@ -143,8 +145,6 @@ def test_non_mapping_config_exits_one(tmp_path, monkeypatch, capsys):
 class PlanLLM:
     """Planner fake: valid synthetic plan + deterministic rows."""
 
-    call_log = []
-
     def __init__(self):
         self.n = 0
 
@@ -210,3 +210,35 @@ def test_run_config_passes_eval_prompts_to_loop(tmp_path, monkeypatch, capsys):
     path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
     cli.run_config(str(path), llm=FakeLLM())
     assert transport.prompts == ["only goal prompt"]
+
+
+def test_plan_then_run_round_trip_threads_dataset_and_prompts(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    cli.plan_goal_command("pirate chef", llm=PlanLLM())
+    capsys.readouterr()
+
+    transport = FakeTransport()
+    monkeypatch.setattr(cli, "_make_transport", lambda: transport)
+    plan_yaml = next((tmp_path / "configs" / "runs").glob("plan_*.yaml"))
+    cli.run_config(str(plan_yaml), llm=FakeLLM())
+
+    assert transport.prompts == ["gp1", "gp2", "gp3", "gp4", "gp5"]
+    assert "eval_prompts" not in transport.last_config
+    assert transport.last_config["dataset"]["kind"] == "synthetic"
+    assert len(transport.last_config["dataset"]["rows"]) == 150
+    assert transport.last_config["goal"] == "pirate chef"
+
+
+def test_run_config_malformed_eval_prompts_falls_back_to_defaults(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    transport = FakeTransport()
+    monkeypatch.setattr(cli, "_make_transport", lambda: transport)
+    path = tmp_path / "odd.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {"model": "qwen2.5-0.5b", "learning_rate": 2e-4, "eval_prompts": "score these well"}
+        ),
+        encoding="utf-8",
+    )
+    cli.run_config(str(path), llm=FakeLLM())
+    assert transport.prompts == DEFAULT_PROMPTS

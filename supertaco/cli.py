@@ -91,6 +91,11 @@ def run_config(config_path: str, llm=None, transport=None) -> None:
     llm = llm if llm is not None else make_llm()
     transport = transport if transport is not None else _make_transport()
     eval_prompts = config.pop("eval_prompts", None) if isinstance(config, dict) else None
+    if eval_prompts is not None and (
+        not isinstance(eval_prompts, list)
+        or not all(isinstance(p, str) and p.strip() for p in eval_prompts)
+    ):
+        eval_prompts = None
 
     def printer(event) -> None:
         print(f"[{event.type}] {json.dumps(event.data, default=str)}")
