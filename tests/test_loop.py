@@ -538,3 +538,27 @@ def test_missing_model_key_is_config_error():
     assert "model None" in (result.error or "")
     assert "T4-viable" in (result.error or "")
     assert transport.calls == []
+
+
+def test_custom_prompts_flow_to_transport_default_unchanged():
+    seen: list[list[str]] = []
+
+    class T:
+        def run_attempt(self, config, prompts, on_line=None):
+            seen.append(list(prompts))
+            return AttemptResult(logs=HEALTHY_LOG)
+
+    cfg = {"model": "qwen2.5-0.5b", "learning_rate": 2e-4}
+    res = run_training_loop(
+        cfg,
+        transport=T(),
+        llm=FakeLLM(),
+        max_retries=0,
+        runs_dir=_tmp_runs(),
+        prompts=["goal prompt one"],
+    )
+    assert seen == [["goal prompt one"]]
+    assert res.success is False  # no RESPONSES_JSON block: honest failure
+
+    run_training_loop(cfg, transport=T(), llm=FakeLLM(), max_retries=0, runs_dir=_tmp_runs())
+    assert seen[1] == DEFAULT_PROMPTS  # default path unchanged

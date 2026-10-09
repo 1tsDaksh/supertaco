@@ -134,6 +134,7 @@ def run_training_loop(
     on_line: Optional[OnLine] = None,
     max_retries: int = 3,
     runs_dir: str = "configs/runs",
+    prompts: Optional[list[str]] = None,
 ) -> LoopResult:
     """Run attempts until the judge passes or the relaunch budget is spent.
 
@@ -182,7 +183,7 @@ def run_training_loop(
     except ConfigurationError as exc:
         return _failed(0, str(exc))
 
-    prompts = list(DEFAULT_PROMPTS)
+    prompts = list(prompts) if prompts else list(DEFAULT_PROMPTS)
     current = dict(config)
     configs_written: list[str] = []
     ledger: list[AttemptRecord] = []
