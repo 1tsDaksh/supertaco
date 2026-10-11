@@ -165,6 +165,25 @@ def test_template_contains_phase2_generation_and_block(tmp_path):
     assert '"fine_tuned": ft_answers' in text
 
 
+def test_template_training_arguments_honors_gradient_checkpointing(tmp_path):
+    # playbook OOM patch flips gradient_checkpointing; the template must pass
+    # it through to TrainingArguments or the patched config is a no-op
+    text = TEMPLATE.read_text(encoding="utf-8")
+    assert "gradient_checkpointing=CFG.get" in text
+    cfg = {
+        "model": "Qwen/Qwen2.5-0.5B-Instruct",
+        "learning_rate": 2e-4,
+        "batch_size": 2,
+        "gradient_checkpointing": True,
+    }
+    out = render_script(cfg, ["p"], TEMPLATE, tmp_path)
+    rendered = out.read_text(encoding="utf-8")
+    block = rendered.split(CFG_START, 1)[1].split(CFG_END, 1)[0]
+    rendered_cfg = ast.literal_eval(block.split("CFG = ", 1)[1].strip())
+    assert rendered_cfg["gradient_checkpointing"] is True
+    py_compile.compile(str(out), doraise=True)
+
+
 def test_template_has_data_region_and_dual_loader():
     text = TEMPLATE.read_text(encoding="utf-8")
     assert "# >>> SUPER_TACO_DATA >>>" in text

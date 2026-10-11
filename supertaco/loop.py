@@ -212,31 +212,47 @@ def run_training_loop(
                 eval_results=last_eval,
             )
 
+        responses = None
         if result.error:
-            ledger.append(
-                AttemptRecord(
-                    attempt, None, None, extract_loss_points(result.logs or ""), dict(current)
+            # `colab exec` exits 0 even when a cell raises (kernel survives), so
+            # a hard VM crash (e.g. CUDA OOM) never arrives as a nonzero exit —
+            # it surfaces as a download-miss error with the training tail glued
+            # on. Route playbook-detectable crashes into the heal path below;
+            # unrecognized errors keep the D9 honest fail-fast.
+            tail = result.logs or ""
+            if not isinstance(tail, str):
+                tail = "\n".join(str(line) for line in tail)
+            crash_text = f"{result.error}\n{tail}"
+            crash_key = detect_failure(crash_text)
+            if crash_key is None:
+                # D9: unrecognized attempt failure — honest fail, no fallback.
+                ledger.append(
+                    AttemptRecord(attempt, None, None, extract_loss_points(tail), dict(current))
                 )
+                return _failed(
+                    attempt,
+                    result.error,
+                    configs=configs_written,
+                    ledger=ledger,
+                    eval_results=last_eval,
+                )
+            # crash produced no responses block; the eval branch below is
+            # unreachable (failure_key is set), so carry the crash text as
+            # train_logs for classify/patch evidence.
+            train_logs = crash_text
+            failure_key = crash_key
+            points = extract_loss_points(crash_text)
+        else:
+            train_logs, responses = split_responses(result.logs)
+            points = extract_loss_points(train_logs)
+            _emit(
+                on_event,
+                "logs_produced",
+                attempt=attempt,
+                text=train_logs,
+                loss_points=points,
             )
-            return _failed(
-                attempt,
-                result.error,
-                configs=configs_written,
-                ledger=ledger,
-                eval_results=last_eval,
-            )
-
-        train_logs, responses = split_responses(result.logs)
-        points = extract_loss_points(train_logs)
-        _emit(
-            on_event,
-            "logs_produced",
-            attempt=attempt,
-            text=train_logs,
-            loss_points=points,
-        )
-
-        failure_key = detect_failure(train_logs)
+            failure_key = detect_failure(train_logs)
         if failure_key is None:
             if responses is None:
                 ledger.append(AttemptRecord(attempt, None, None, points, dict(current)))

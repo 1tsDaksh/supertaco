@@ -576,3 +576,66 @@ def test_custom_prompts_reach_the_judge():
     )
     assert res.success is True
     assert res.eval_results["prompts"] == ["goal prompt one"]
+
+
+# ---------- hard VM crashes (exec exits 0) must reach the heal path ----------
+
+
+def test_oom_crash_retries_with_halved_batch():
+    oom_tail = "OutOfMemoryError: CUDA out of memory. Tried to allocate 2.06 GiB."
+    transport = FakeTransport(
+        [
+            AttemptResult(
+                logs=oom_tail,
+                error=(
+                    f"Download failed: no /content/lora_adapter.zip (training tail: {oom_tail})"
+                ),
+            ),
+            lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts)),
+        ]
+    )
+    llm = FakeLLM()
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "batch_size": 8, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=llm,
+        on_event=on_event,
+        runs_dir=str(_tmp_runs()),
+    )
+    assert result.success is True
+    assert result.attempts == 2
+    assert len(transport.calls) == 2
+    second = transport.calls[1]
+    assert second["batch_size"] == 4  # playbook OOM fix halves batch_size
+    assert second["gradient_checkpointing"] is True
+    assert any(c["model_key"] == "classify" for c in llm.call_log)
+    assert any(c["model_key"] == "patch" for c in llm.call_log)
+    types = [e.type for e in events]
+    assert "failure_detected" in types and "patch_written" in types
+    assert types.count("logs_produced") == 1  # the crash attempt emits no fake logs
+    rec = result.attempt_ledger[0]
+    assert rec.failure_key == "OOM"
+    assert rec.config_after["batch_size"] == 4
+    assert rec.config_after["gradient_checkpointing"] is True
+
+
+def test_unrecognized_error_still_fails_fast():
+    transport = FakeTransport(
+        [AttemptResult(logs="zorp quuxle", error="zorp quuxle: totally unrecognized")]
+    )
+    llm = FakeLLM()
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "batch_size": 8, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=llm,
+        on_event=on_event,
+        runs_dir=str(_tmp_runs()),
+    )
+    assert result.success is False
+    assert result.attempts == 1
+    assert len(transport.calls) == 1  # D9: no retry for unrecognized failures
+    assert result.failure_key is None
+    assert llm.call_log == []  # no classify/patch on a fail-fast
+    assert [e.type for e in events][-1] == "run_failed"

@@ -129,6 +129,8 @@ def main() -> None:
         output_dir="/content/out",
         per_device_train_batch_size=CFG["batch_size"],
         gradient_accumulation_steps=CFG.get("grad_accum", 2),
+        # playbook OOM fix flips this on; honor it or the patch is a no-op
+        gradient_checkpointing=CFG.get("gradient_checkpointing", False),
         learning_rate=CFG["learning_rate"],
         num_train_epochs=CFG["num_epochs"],
         fp16=True,
