@@ -98,16 +98,17 @@ chat_template: llama-3
 
 Instead of the static config, describe what you want the model to learn:
 
-- **Dashboard:** type a goal → **Plan with Nemotron** → review/edit the config knobs, the
-  dataset source (synthetic ~150 generated rows, or a named Hugging Face dataset) and the 5
+- **Dashboard:** type a goal → **Plan with Nemotron** → review the dataset source (synthetic
+  ~150 generated rows, or a named Hugging Face dataset), edit the config knobs and the 5
   domain eval prompts → **Run**.
 - **CLI:** `supertaco plan "answer like a pirate chef"` writes a reviewable
   `configs/runs/plan_<ts>.yaml`; inspect it, then
   `supertaco run configs/runs/plan_<ts>.yaml`.
 
-The planner is a single Nemotron (super) call; unparseable replies fall back to the shipped
-defaults (flagged as `fallback` in the plan and the dashboard). Values are clamped to T4-safe
-ranges, models must be on the whitelist, and the judge suite stays at exactly 5 prompts.
+The planner is a single Nemotron (super) call (synthetic datasets add a few row-generation
+calls); unparseable replies fall back to the shipped defaults (the CLI prints `mode=fallback`;
+the dashboard warns). Values are clamped to T4-safe ranges, models must be on the whitelist,
+and the planner emits exactly 5 judge prompts (the judge scores at most 5).
 
 ## Nemotron / Token Factory usage
 
@@ -127,7 +128,7 @@ ranges, models must be on the whitelist, and the judge suite stays at exactly 5 
 ## Testing & validation
 
 ```bash
-python -m pytest tests/ -q                # 84 tests - transport and LLM faked, no network/credits
+python -m pytest tests/ -q                # 134 tests - transport and LLM faked, no network/credits
 python -m ruff check .                    # lint
 python -m ruff format --check supertaco tests
 python -m mypy supertaco/                 # 13 pre-existing findings (deferred)
