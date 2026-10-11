@@ -241,7 +241,7 @@ Rules:
 Goal: {goal}
 
 Return ONLY a JSON array of objects. No prose, no markdown."""
-        return self._call("patch", prompt, max_tokens=4096)
+        return self._call("patch", prompt, max_tokens=8192)
 
     def log_call(self, model_key: str, tokens: int, latency: float, escalation_reason: str = None):
         """Log an LLM call for audit and cost tracking."""

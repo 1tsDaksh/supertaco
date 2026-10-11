@@ -100,5 +100,5 @@ def test_generate_rows_prompt_and_return(monkeypatch, tmp_path):
     assert json.loads(text) == [{"instruction": "x", "input": "", "output": "y"}]
     assert "exactly 5" in seen["prompt"]
     assert "old one" in seen["prompt"]
-    assert seen["max_tokens"] == 4096
+    assert seen["max_tokens"] == 8192
     assert client.call_log[-1]["model_key"] == "patch"
