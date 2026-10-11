@@ -78,3 +78,20 @@ def test_generate_dataset_never_raises_when_llm_raises():
 
     rows = generate_dataset("g", Boom(), target=150, floor=100, max_calls=3)
     assert rows == []
+
+
+def test_generate_dataset_skips_failed_chunk_and_resumes():
+    class Mixed:
+        def __init__(self):
+            self.calls = []
+
+        def generate_rows(self, goal, count, banned):
+            self.calls.append(count)
+            if len(self.calls) == 2:
+                return "truncated garbage, no array"
+            return json.dumps(_rows(f"c{len(self.calls)}", 25))
+
+    llm = Mixed()
+    rows = generate_dataset("g", llm, target=60, chunk=25, floor=50, max_calls=3)
+    assert len(rows) == 50
+    assert len(llm.calls) == 3

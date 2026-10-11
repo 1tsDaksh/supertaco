@@ -37,11 +37,15 @@ def generate_dataset(
     llm: Any,
     *,
     target: int = 150,
-    chunk: int = 50,
+    chunk: int = 25,
     floor: int = 100,
     max_calls: int = 6,
 ) -> list[dict]:
     """Generate alpaca-shaped rows for a goal.
+
+    chunk=25 keeps a reply within the provider's observed ~4100-4700
+    completion-token ceiling (50-row replies truncate mid-array even at
+    max_tokens=8192); max_calls=6 still covers target=150 exactly.
 
     Returns [] when the quality floor is not met after max_calls chunks (G8:
     the caller falls back to the alpaca slice with a flag).
@@ -55,10 +59,11 @@ def generate_dataset(
         try:
             batch = _extract_array(llm.generate_rows(goal, count, banned))
         except Exception:
-            # G8: any generation/parse failure ends chunking; the floor check
-            # below decides between returning partial rows or [] so the caller
-            # can fall back to the alpaca slice (never raises).
-            break
+            # G8: a failed/truncated chunk is skipped and the remaining
+            # chunks are still tried (bounded by max_calls); the floor check
+            # below decides between partial rows or [] so the caller can fall
+            # back to the alpaca slice (never raises).
+            continue
         for rec in batch:
             row = _clean_row(rec)
             if row is None or row["instruction"].lower() in banned:
