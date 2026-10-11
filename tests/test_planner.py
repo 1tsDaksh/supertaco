@@ -145,7 +145,7 @@ def test_plan_run_clamps_non_finite_floats():
         ("learning_rate", 1e-7, 1e-5),
         ("learning_rate", 9.0, 1e-3),
         ("batch_size", 0, 1),
-        ("batch_size", 64, 16),
+        ("batch_size", 64, 4),  # clamp to 16, then model-size cap (1.5b) to 4
         ("lora_r", 1, 4),
         ("lora_r", 128, 32),
         ("lora_alpha", 1, 8),
@@ -185,3 +185,19 @@ def test_plan_run_blank_prompt_strings_fall_back_to_defaults():
 def test_plan_run_unknown_dataset_kind_becomes_synthetic():
     plan = plan_run("x", _LLM(json.dumps(dict(GOOD, dataset={"kind": "csv"}))))
     assert plan.dataset.kind == "synthetic"
+
+
+def test_plan_to_config_caps_batch_for_large_model():
+    plan = plan_run("x", _LLM(json.dumps(dict(GOOD, model="qwen2.5-1.5b", batch_size=16))))
+    assert plan.batch_size == 4  # joint model x batch ceiling, not just the 16 clamp
+    assert plan_to_config(plan)["batch_size"] == 4
+
+
+def test_plan_caps_batch_for_3b_model():
+    plan = plan_run("x", _LLM(json.dumps(dict(GOOD, model="qwen2.5-3b", batch_size=16))))
+    assert plan.batch_size == 2
+
+
+def test_plan_keeps_batch_for_small_model():
+    plan = plan_run("x", _LLM(json.dumps(dict(GOOD, model="qwen2.5-0.5b", batch_size=8))))
+    assert plan.batch_size == 8  # cap >= requested batch: unchanged

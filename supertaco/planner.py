@@ -89,11 +89,25 @@ def _clamp(plan: RunPlan) -> None:
     plan.num_epochs = min(max(plan.num_epochs, 1), 3)
 
 
+_T4_BATCH_CAPS: dict[str, int] = {
+    "Qwen/Qwen2.5-0.5B-Instruct": 8,
+    "TinyLlama/TinyLlama-1.1B-Chat-v1.0": 4,
+    "Qwen/Qwen2.5-1.5B-Instruct": 4,
+    "Qwen/Qwen2.5-3B-Instruct": 2,
+}
+
+
 def _validate_model(plan: RunPlan) -> None:
     try:
         plan.model = resolve_model(plan.model)
     except ConfigurationError:
         plan.model = "qwen2.5-0.5b"
+
+
+def _cap_batch_for_model(model: str, batch: int) -> int:
+    """Joint model-size x batch ceiling so a whitelisted pair fits a T4."""
+    cap = _T4_BATCH_CAPS.get(model)
+    return batch if cap is None else min(batch, cap)
 
 
 def _validate_prompts(plan: RunPlan) -> None:
@@ -121,6 +135,7 @@ def plan_run(goal: str, llm: Any) -> RunPlan:
             plan.dataset = _dataset_spec(blob["dataset"])
         _validate_model(plan)
         _clamp(plan)
+        plan.batch_size = _cap_batch_for_model(plan.model, plan.batch_size)
         _validate_prompts(plan)
         return plan
     except Exception:
