@@ -202,6 +202,73 @@ def test_http_failure_alert_distinguishes_transport_from_hash(app, monkeypatch):
     assert "unparseable" not in warnings_text
 
 
+class MixedJudgeLLM(FakeLLM):
+    """Prompt 2: base transport-fails, ft real-unparseable. Others: real 10/10."""
+
+    def _call(self, model_key, prompt, **kw):
+        mode, error, reply = "real", None, "10/10"
+        if "Write a Python function" in prompt:
+            if "ft answer" in prompt:
+                reply = "no numbers in this reply"
+            else:
+                mode, error, reply = "fallback", "ConnectError: connection refused", "no numbers"
+        self.call_log.append(
+            {"model_key": model_key, "mode": mode, "tokens": 1, "latency": 0.01, "error": error}
+        )
+        return reply
+
+
+def test_mixed_hash_and_fallback_cells_render_both_warnings_with_selective_dagger(app, monkeypatch):
+    class AnswerTransport(FakeTransport):
+        def run_attempt(self, config, prompts, on_line=None):
+            from supertaco.loop import AttemptResult
+
+            self.calls += 1
+            block = json.dumps(
+                {
+                    "base": {p: f"base answer to {p}" for p in prompts},
+                    "fine_tuned": {p: f"ft answer to {p}" for p in prompts},
+                }
+            )
+            text = f"{HEALTHY_LOG}\n{RESPONSES_START}\n{block}\n{RESPONSES_END}"
+            return AttemptResult(logs=text, artifact=None, error=None)
+
+    _patch_run(monkeypatch, AnswerTransport([(HEALTHY_LOG, "ok", None)]), MixedJudgeLLM())
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    result = app.session_state["run_result"]
+    assert result.success is True  # hash of prompt-2 responses must not trip regression
+    warnings_text = "\n".join(w.value for w in app.warning)
+    assert "HTTP failure" in warnings_text
+    assert "unparseable" in warnings_text
+    judge_df = next(df for df in app.dataframe if "judge" in df.value.columns)
+    cells = [str(m) for m in judge_df.value["judge"]]
+    assert cells.count("base:fallback / ft:hash †") == 1
+    assert cells.count("base:real / ft:real") == 4
+    for cell in cells:
+        assert cell.count("†") == (1 if "hash" in cell else 0)
+        assert "fallback †" not in cell
+        assert "real †" not in cell
+
+
+def test_config_yaml_read_only_when_key_missing(monkeypatch, offline):
+    reads = []
+    real_read_text = Path.read_text
+
+    def spy(path_self, *args, **kwargs):
+        if "colab_t4" in str(path_self):
+            reads.append(str(path_self))
+        return real_read_text(path_self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", spy)
+    at = AppTest.from_file(str(DASHBOARD), default_timeout=60)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert len(reads) == 1  # first load preloads the shipped default
+    at.run()
+    assert len(reads) == 1  # config already in session state: no re-read
+
+
 def test_initial_render_no_exceptions(app):
     assert any("Fine-tune on Colab" in b.label for b in app.button)
     assert not any("Load Fixture" in b.label for b in app.button)  # fixtures gone

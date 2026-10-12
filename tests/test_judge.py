@@ -72,6 +72,26 @@ def test_transport_failure_after_retry_reports_fallback_mode():
     assert len(llm.call_log) == 2
 
 
+def test_fallback_mode_with_no_error_reports_unknown_transport_error():
+    class SilentFallbackLLM(FallbackLLM):
+        def _call(self, model_key, prompt, max_tokens=1024, temperature=0.0):
+            self.call_log.append(
+                {
+                    "model_key": model_key,
+                    "mode": "fallback",
+                    "tokens": 0,
+                    "latency": 0.0,
+                    "error": None,
+                }
+            )
+            return "no numbers here"
+
+    result = score_response("p", "r", llm=SilentFallbackLLM())
+    assert result.mode == "fallback"
+    assert "unknown transport error" in result.error
+    assert "None" not in result.error
+
+
 def test_final_real_unparseable_after_earlier_http_failure_reports_hash():
     class MixedLLM:
         def __init__(self):

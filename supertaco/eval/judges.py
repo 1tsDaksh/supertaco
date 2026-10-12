@@ -71,7 +71,8 @@ def score_response(
         return JudgeResult(
             _hash_score(prompt, response),
             "fallback",
-            f"judge HTTP failure: {http_error}; reply unparseable: {text[:60]!r}",
+            f"judge HTTP failure: {http_error or 'unknown transport error'}; "
+            f"reply unparseable: {text[:60]!r}",
         )
     return JudgeResult(
         _hash_score(prompt, response), "hash", f"unparseable judge output: {text[:80]!r}"

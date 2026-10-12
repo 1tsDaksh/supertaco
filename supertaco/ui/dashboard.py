@@ -83,7 +83,6 @@ def _default_config(cfg_path: str = "configs/defaults/colab_t4.yaml") -> dict:
 def init_session2():
     """Initialise session-state variables if not already set."""
     defaults = {
-        "config": _default_config(),
         "cfg_path": "configs/defaults/colab_t4.yaml",
         "knobs": {},
         "llm_calls": [],
@@ -97,6 +96,8 @@ def init_session2():
     for key, val in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = val
+    if "config" not in st.session_state:
+        st.session_state["config"] = _default_config()
 
 
 def reset_session2():
