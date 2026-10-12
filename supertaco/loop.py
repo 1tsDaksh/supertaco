@@ -23,6 +23,7 @@ from supertaco.agent.playbook import (
     detect_failure,
 )
 from supertaco.errors import ConfigurationError
+from supertaco.paths import repo_root
 
 LOSS_RE = re.compile(r"\bloss\s+([0-9]+\.[0-9]+|NaN)\b", re.I)
 
@@ -95,6 +96,12 @@ def validate_config(config: dict) -> None:
         raise ConfigurationError("Config is missing 'learning_rate'")
 
 
+def _resolve_runs_dir(runs_dir: str | Path) -> Path:
+    """Anchor a relative runs_dir to the repo root; absolute paths pass through."""
+    path = Path(runs_dir)
+    return path if path.is_absolute() else repo_root() / path
+
+
 def _write_config(config: dict, failure_key: str, runs_dir: Path) -> str:
     """Write a NEW patched config file (invariant 3: never overwrite)."""
     runs_dir.mkdir(parents=True, exist_ok=True)
@@ -147,6 +154,7 @@ def run_training_loop(
 
     _emit(on_event, "run_started", max_retries=max_retries, mode="colab_t4")
     llm = llm or make_llm()
+    runs_path = _resolve_runs_dir(runs_dir)
 
     def _failed(
         attempts: int,
@@ -338,7 +346,7 @@ def run_training_loop(
             proposal=proposal,
         )
         new_config = apply_default_fix(failure_key, current)
-        path = _write_config(new_config, failure_key, Path(runs_dir))
+        path = _write_config(new_config, failure_key, runs_path)
         configs_written.append(path)
         _emit(
             on_event,

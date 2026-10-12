@@ -9,15 +9,26 @@ from supertaco.errors import ConfigurationError
 from supertaco.eval.harness import DEFAULT_PROMPTS, RESPONSES_END, RESPONSES_START
 from supertaco.loop import (
     AttemptResult,
+    _resolve_runs_dir,
     extract_loss_points,
     run_training_loop,
     validate_config,
 )
+from supertaco.paths import repo_root
 
 
 def _tmp_runs():
     d = tempfile.mkdtemp(prefix="st_runs_")
     return d
+
+
+def test_resolve_runs_dir_anchors_relative_to_repo_root():
+    assert _resolve_runs_dir("configs/runs") == repo_root() / "configs" / "runs"
+
+
+def test_resolve_runs_dir_passes_absolute_through(tmp_path):
+    assert _resolve_runs_dir(tmp_path) == tmp_path
+    assert _resolve_runs_dir(str(tmp_path)) == tmp_path
 
 
 HEALTHY_LOG = (

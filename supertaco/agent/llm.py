@@ -1,4 +1,12 @@
 import time
+from pathlib import Path
+
+from supertaco.paths import repo_root
+
+
+def _logs_dir() -> Path:
+    """Audit-log directory, anchored to the repo root (cwd-independent). Test seam."""
+    return repo_root() / "logs"
 
 
 class NemotronClient:
@@ -114,9 +122,8 @@ class NemotronClient:
         self.call_log.append(entry)
         try:
             import json
-            from pathlib import Path
 
-            log_dir = Path("logs")
+            log_dir = _logs_dir()
             log_dir.mkdir(exist_ok=True)
             with open(log_dir / "llm_calls.jsonl", "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(entry) + "\n")

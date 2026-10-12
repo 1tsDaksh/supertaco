@@ -2,15 +2,30 @@
 
 import json
 
+import pytest
+
+from supertaco.agent import llm as llm_module
 from supertaco.agent.llm import NemotronClient
+
+
+@pytest.fixture(autouse=True)
+def _isolate_logs(monkeypatch, tmp_path):
+    """Never write the audit log to the real repo logs/ during tests."""
+    monkeypatch.setattr(llm_module, "_logs_dir", lambda: tmp_path / "logs")
 
 
 def _client() -> NemotronClient:
     return NemotronClient(base_url="http://token-factory.invalid/v1", api_key="k", timeout=1)
 
 
+def test_logs_dir_defaults_to_repo_root(monkeypatch):
+    monkeypatch.undo()  # drop the autouse seam patch to see the real default
+    from supertaco.paths import repo_root
+
+    assert llm_module._logs_dir() == repo_root() / "logs"
+
+
 def test_real_call_records_mode_and_tokens(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
     client = _client()
     monkeypatch.setattr(
         NemotronClient,
@@ -29,7 +44,6 @@ def test_real_call_records_mode_and_tokens(monkeypatch, tmp_path):
 
 
 def test_failed_call_falls_back_and_opens_circuit(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
     client = _client()
     calls = []
 
@@ -53,7 +67,6 @@ def test_failed_call_falls_back_and_opens_circuit(monkeypatch, tmp_path):
 
 
 def test_jsonl_write_failure_never_kills_run(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
     client = _client()
     monkeypatch.setattr(
         NemotronClient,
@@ -67,7 +80,6 @@ def test_jsonl_write_failure_never_kills_run(monkeypatch, tmp_path):
 
 
 def test_plan_goal_prompt_and_return(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
     client = _client()
     seen = {}
 
@@ -86,7 +98,6 @@ def test_plan_goal_prompt_and_return(monkeypatch, tmp_path):
 
 
 def test_generate_rows_prompt_and_return(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
     client = _client()
     seen = {}
 
