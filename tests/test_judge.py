@@ -45,6 +45,59 @@ def test_unparseable_judge_output_falls_back_to_hash():
     assert len(llm.call_log) == 2  # one retry, then hash
 
 
+class FallbackLLM:
+    """HTTP-level failure: every call logged as fallback, replies unparseable."""
+
+    def __init__(self):
+        self.call_log = []
+
+    def _call(self, model_key, prompt, max_tokens=1024, temperature=0.0):
+        self.call_log.append(
+            {
+                "model_key": model_key,
+                "mode": "fallback",
+                "tokens": 0,
+                "latency": 0.0,
+                "error": "ConnectError: connection refused",
+            }
+        )
+        return '{"fix": "lower_learning_rate", "reason": "model suggests LR reduction"}'
+
+
+def test_transport_failure_after_retry_reports_fallback_mode():
+    llm = FallbackLLM()
+    result = score_response("p", "r", llm=llm)
+    assert result.mode == "fallback"
+    assert 2.0 <= result.score <= 10.0
+    assert len(llm.call_log) == 2
+
+
+def test_final_real_unparseable_after_earlier_http_failure_reports_hash():
+    class MixedLLM:
+        def __init__(self):
+            self.call_log = []
+            self.calls = 0
+
+        def _call(self, model_key, prompt, max_tokens=1024, temperature=0.0):
+            self.calls += 1
+            mode = "fallback" if self.calls == 1 else "real"
+            error = "ConnectError: connection refused" if mode == "fallback" else None
+            self.call_log.append(
+                {"model_key": model_key, "mode": mode, "tokens": 0, "latency": 0.0, "error": error}
+            )
+            return "" if mode == "fallback" else "no numbers here"
+
+    result = score_response("p", "r", llm=MixedLLM())
+    assert result.mode == "hash"
+
+
+def test_suite_reports_fallback_modes_for_transport_failures():
+    base = {p: f"base answer to {p}" for p in DEFAULT_PROMPTS}
+    ft = {p: f"ft answer to {p}" for p in DEFAULT_PROMPTS}
+    results = run_eval_suite(DEFAULT_PROMPTS, base, ft, llm=FallbackLLM())
+    assert all(m == "base:fallback / ft:fallback" for m in results["modes"])
+
+
 def test_empty_reply_retries_once_then_scores():
     llm = FakeLLM(["", "7"])
     result = score_response("p", "r", llm=llm)

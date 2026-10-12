@@ -1,9 +1,11 @@
 """AppTest: config -> real loop (faked transport + LLM) -> report."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
+import yaml
 from streamlit.testing.v1 import AppTest
 
 from supertaco.eval.harness import DEFAULT_PROMPTS, RESPONSES_END, RESPONSES_START
@@ -119,6 +121,85 @@ def _launch(app):
     btn = next(b for b in app.button if "Fine-tune on Colab" in b.label)
     btn.click().run()
     return app
+
+
+class UnparseableJudgeLLM(FakeLLM):
+    """Real replies (call_log mode real) that the judge cannot parse."""
+
+    def _call(self, model_key, prompt, **kw):
+        self.call_log.append(
+            {"model_key": model_key, "mode": "real", "tokens": 1, "latency": 0.01, "error": None}
+        )
+        return "no numbers in this reply"
+
+
+class TransportFailLLM(FakeLLM):
+    """HTTP-level failure: call_log mode fallback, simulated unparseable replies."""
+
+    def _call(self, model_key, prompt, **kw):
+        self.call_log.append(
+            {
+                "model_key": model_key,
+                "mode": "fallback",
+                "tokens": 0,
+                "latency": 0.0,
+                "error": "ConnectError: connection refused",
+            }
+        )
+        return '{"fix": "lower_learning_rate", "reason": "model suggests LR reduction"}'
+
+
+def test_page_config_declared_before_any_other_st_call():
+    src = DASHBOARD.read_text(encoding="utf-8")
+    idx = src.index("st.set_page_config(")
+    assert idx > 0
+    assert not re.search(r"\bst\.\w+\s*\(", src[:idx])
+
+
+def test_default_config_preloaded_into_session(app):
+    expected = yaml.safe_load(
+        (REPO / "configs" / "defaults" / "colab_t4.yaml").read_text(encoding="utf-8-sig")
+    )
+    assert app.session_state["config"] == expected
+    assert app.session_state["config"]["model"] == "qwen2.5-0.5b"
+
+
+def test_default_config_helper_returns_empty_on_read_error(monkeypatch):
+    import supertaco.ui.dashboard as dash
+
+    def _boom(*args, **kwargs):
+        raise OSError("disk on fire")
+
+    monkeypatch.setattr(dash.yaml, "safe_load", _boom)
+    assert dash._default_config() == {}
+
+
+def test_sidebar_omits_vestigial_tavily_caption(app):
+    assert not any("TAVILY" in c.value for c in app.sidebar.caption)
+
+
+def test_hash_judge_alert_says_unparseable_not_llm_unavailable(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), UnparseableJudgeLLM())
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    warnings_text = "\n".join(w.value for w in app.warning)
+    assert "unparseable" in warnings_text
+    assert "LLM unavailable" not in warnings_text
+    # the call itself was real — sidebar and report must not contradict each other
+    app.run()  # sidebar renders before the run in a pass; re-render to see its calls
+    assert any("real call" in s.value for s in app.sidebar.success)
+    judge_df = next(df for df in app.dataframe if "judge" in df.value.columns)
+    assert all("†" in str(m) for m in judge_df.value["judge"])
+    assert any("†" in c.value for c in app.caption)
+
+
+def test_http_failure_alert_distinguishes_transport_from_hash(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), TransportFailLLM())
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    warnings_text = "\n".join(w.value for w in app.warning)
+    assert "HTTP failure" in warnings_text
+    assert "unparseable" not in warnings_text
 
 
 def test_initial_render_no_exceptions(app):
@@ -326,6 +407,8 @@ def test_goal_plan_then_run_threads_dataset_and_prompts(app, monkeypatch):
     next(b for b in app.button if "Plan with Nemotron" in b.label).click().run()
     assert not app.exception, [e.value for e in app.exception]
     assert any("Plan ready" in s.value for s in app.success)
+    assert any('Planned for: "answer like a pirate chef"' in s.value for s in app.success)
+    assert app.session_state["plan_goal"] == "answer like a pirate chef"
     assert app.session_state["plan_dataset"]["kind"] == "synthetic"
     assert len(app.session_state["plan_dataset"]["rows"]) == 150
     assert app.session_state["plan_prompts"] == ["gp1", "gp2", "gp3", "gp4", "gp5"]
@@ -380,4 +463,6 @@ def test_plan_fallback_shows_warning(app, monkeypatch):
     next(b for b in app.button if "Plan with Nemotron" in b.label).click().run()
     assert not app.exception, [e.value for e in app.exception]
     assert any("fell back" in w.value for w in app.warning)
+    assert any('Planned for: "g"' in w.value for w in app.warning)
+    assert app.session_state["plan_goal"] == "g"
     assert app.session_state["plan_prompts"] == DEFAULT_PROMPTS

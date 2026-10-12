@@ -20,6 +20,8 @@ from supertaco.eval.harness import PROMPT_SUITE_SIZE
 from supertaco.loop import Event, extract_loss_points, make_llm, run_training_loop
 from supertaco.planner import materialize_dataset, plan_run, plan_to_config
 
+st.set_page_config(page_title="SuperTaco", page_icon="🌮")
+
 
 # ─── Load settings directly from .env (no package import needed) ────────────
 def _load_env():
@@ -67,10 +69,21 @@ _settings = get_settings()
 
 
 # ─── Session State Initialisation ────────────────────────────────
+def _default_config(cfg_path: str = "configs/defaults/colab_t4.yaml") -> dict:
+    """Shipped T4 default so the YAML editor starts filled; {} on any error."""
+    repo = Path(__file__).resolve().parents[2]
+    target = Path(cfg_path) if Path(cfg_path).is_absolute() else repo / cfg_path
+    try:
+        loaded = yaml.safe_load(target.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
 def init_session2():
     """Initialise session-state variables if not already set."""
     defaults = {
-        "config": {},
+        "config": _default_config(),
         "cfg_path": "configs/defaults/colab_t4.yaml",
         "knobs": {},
         "llm_calls": [],
@@ -111,7 +124,6 @@ def render_sidebar() -> Dict[str, any]:
     st.sidebar.markdown("### API Keys (from .env)")
     st.sidebar.caption(f"NEBIUS_PROJECT_ID: {_settings.nebius_project_id}")
     st.sidebar.caption("NEBIUS_API_KEY: loaded from .env on import")
-    st.sidebar.caption("TAVILY_API_KEY: loaded from .env on import")
 
     st.sidebar.markdown("### Model Cost Routing")
     st.sidebar.caption(
@@ -225,6 +237,7 @@ def render_goal_panel() -> None:
     with st.spinner("Nemotron is drafting your run plan..."):
         llm = make_llm()
         plan = materialize_dataset(plan_run(goal, llm), goal, llm)
+    st.session_state["plan_goal"] = goal
     st.session_state["plan_dataset"] = plan.dataset.model_dump(exclude_none=True)
     st.session_state["plan_prompts"] = list(plan.eval_prompts)
     cfg = plan_to_config(plan)
@@ -243,11 +256,15 @@ def render_goal_panel() -> None:
     }
     if plan.plan_mode == "fallback":
         st.warning(
+            f'Planned for: "{st.session_state["plan_goal"]}" — '
             "Planner fell back to shipped defaults (Nemotron reply unparseable) - "
             "review everything before running."
         )
     else:
-        st.success("Plan ready - review config, dataset and eval prompts, then Run.")
+        st.success(
+            f'Planned for: "{st.session_state["plan_goal"]}" — '
+            "Plan ready - review config, dataset and eval prompts, then Run."
+        )
 
 
 def render_report() -> None:
@@ -306,17 +323,26 @@ def render_report() -> None:
             st.error("🚨 EVAL REGRESSION: fine-tuned is >10% below baseline.")
         else:
             st.caption("✅ Regression check passed (fine-tuned ≥ 90% of base).")
-        if any("hash" in m for m in results["modes"]):
+        modes = results["modes"]
+        if any("fallback" in m for m in modes):
             st.warning(
-                "⚠ Judge fell back to hash mode (LLM unavailable) — "
-                "scores are deterministic placeholders."
+                "⚠ Judge HTTP failure (transport/circuit) — affected scores did not "
+                "come from a live Nemotron reply."
+            )
+        if any("hash" in m for m in modes):
+            st.warning(
+                "⚠ Judge reply unparseable after retry — affected scores are "
+                "deterministic hash placeholders."
+            )
+            st.caption(
+                "† hash-mode score — deterministic placeholder (no parseable Nemotron reply)."
             )
         st.dataframe(
             {
                 "prompt": results["prompts"],
                 "base": results["base_scores"],
                 "fine_tuned": results["fine_tuned_scores"],
-                "judge": results["modes"],
+                "judge": [f"{m} †" if "hash" in m else m for m in modes],
             },
             use_container_width=True,
             hide_index=True,

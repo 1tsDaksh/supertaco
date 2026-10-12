@@ -42,7 +42,9 @@ def score_response(
 
     Parse failure retries the judge once (Nemotron occasionally emits empty
     content); a second failure or missing client falls back to the
-    deterministic hash. HTTP-level mode (real/fallback) is inherited.
+    deterministic hash. On success the HTTP-level mode (real/fallback) is
+    inherited; on final failure the mode reflects the last call's cause:
+    "fallback" for an HTTP-level failure, "hash" for an unparseable reply.
     """
     if llm is None:
         return JudgeResult(_hash_score(prompt, response), "hash", "no llm client")
@@ -65,6 +67,12 @@ def score_response(
         if raw is not None:
             score = max(0.0, min(10.0, raw))
             return JudgeResult(round(score, 2), http_mode, http_error)
+    if http_mode == "fallback":
+        return JudgeResult(
+            _hash_score(prompt, response),
+            "fallback",
+            f"judge HTTP failure: {http_error}; reply unparseable: {text[:60]!r}",
+        )
     return JudgeResult(
         _hash_score(prompt, response), "hash", f"unparseable judge output: {text[:80]!r}"
     )
