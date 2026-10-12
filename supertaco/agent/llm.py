@@ -21,21 +21,45 @@ class NemotronClient:
         "patch": "nvidia/nemotron-3-super-120b-a12b",
         "deep_reason": "nvidia/Nemotron-3-Ultra-550b-a55b",
     }
+    FAILURE_THRESHOLD = 2
+    COOLDOWN_SECONDS = 60.0
+    _NON_RETRYABLE_STATUS = frozenset({400, 401, 403, 404, 410, 422})
 
     def __init__(self, base_url: str, api_key: str, timeout: float = 30.0):
         self.base_url = base_url
         self.api_key = api_key
         self.timeout = timeout
         self.call_log: list[dict] = []
-        self._circuit_open = False
+        self._consecutive_failures = 0
+        self._circuit_open_until: float | None = None
+
+    @property
+    def _circuit_open(self) -> bool:
+        """Breaker state; cooldown expiry closes it so the next call probes (half-open)."""
+        if self._circuit_open_until is None:
+            return False
+        if time.monotonic() >= self._circuit_open_until:
+            self._circuit_open_until = None
+            return False
+        return True
+
+    @classmethod
+    def _is_non_retryable(cls, exc: BaseException) -> bool:
+        """Auth/client errors are permanent: one strike opens the breaker."""
+        return getattr(exc, "status_code", None) in cls._NON_RETRYABLE_STATUS
 
     def _http_call(
-        self, model_id: str, prompt: str, max_tokens: int, temperature: float
+        self,
+        model_id: str,
+        prompt: str,
+        max_tokens: int,
+        temperature: float,
+        timeout: float,
     ) -> tuple[str, int]:
         """Real Token Factory HTTP call. Returns (text, total_tokens). Test seam."""
         from openai import OpenAI
 
-        client = OpenAI(base_url=self.base_url, api_key=self.api_key, timeout=self.timeout)
+        client = OpenAI(base_url=self.base_url, api_key=self.api_key, timeout=timeout)
         response = client.chat.completions.create(
             model=model_id,
             messages=[{"role": "user", "content": prompt}],
@@ -47,17 +71,26 @@ class NemotronClient:
         return text, tokens
 
     def _call(
-        self, model_key: str, prompt: str, max_tokens: int = 1024, temperature: float = 0.0
+        self,
+        model_key: str,
+        prompt: str,
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+        *,
+        timeout: float | None = None,
+        shape: str = "object",
     ) -> str:
         """Call Nemotron via Token Factory; on any failure fall back to heuristics.
 
-        First failure opens the circuit for the rest of this client's life so a
-        dead API costs one timeout instead of one per call (spec D3).
+        The breaker opens after FAILURE_THRESHOLD consecutive failures (or one
+        non-retryable HTTP error) and closes again after COOLDOWN_SECONDS with
+        a probe call, so a single transient timeout degrades only the calls
+        around it instead of the rest of the client's life (spec D3).
         """
         model_id = self.MODELS[model_key]
         start = time.monotonic()
         if self._circuit_open:
-            text = self._simulate_response(model_id, prompt)
+            text = self._simulate_response(model_id, prompt, shape)
             self._record(
                 model_key,
                 model_id,
@@ -69,10 +102,18 @@ class NemotronClient:
             )
             return text
         try:
-            text, tokens = self._http_call(model_id, prompt, max_tokens, temperature)
+            text, tokens = self._http_call(
+                model_id,
+                prompt,
+                max_tokens,
+                temperature,
+                self.timeout if timeout is None else timeout,
+            )
         except Exception as exc:
-            self._circuit_open = True
-            text = self._simulate_response(model_id, prompt)
+            self._consecutive_failures += 1
+            if self._is_non_retryable(exc) or self._consecutive_failures >= self.FAILURE_THRESHOLD:
+                self._circuit_open_until = time.monotonic() + self.COOLDOWN_SECONDS
+            text = self._simulate_response(model_id, prompt, shape)
             self._record(
                 model_key,
                 model_id,
@@ -83,6 +124,8 @@ class NemotronClient:
                 error=f"{type(exc).__name__}: {exc}",
             )
             return text
+        self._consecutive_failures = 0
+        self._circuit_open_until = None
         self._record(
             model_key,
             model_id,
@@ -134,8 +177,8 @@ class NemotronClient:
             entry["jsonl_written"] = False
             warnings.warn(f"llm_calls.jsonl write failed: {exc}", stacklevel=2)
 
-    def _simulate_response(self, model_id: str, prompt: str) -> str:
-        """Simulate Nemotron response based on model and prompt."""
+    def _simulate_response(self, model_id: str, prompt: str, shape: str = "object") -> str:
+        """Simulate Nemotron response based on model, prompt, and requested shape."""
         # Simple heuristic-based simulation for demo purposes
         if "classify" in model_id.lower() or "nano" in model_id.lower():
             # Nano: quick classification
@@ -159,7 +202,9 @@ class NemotronClient:
                 return "UNKNOWN"
 
         elif "super" in model_id.lower():
-            # Super: patch/draft proposals
+            # Super: patch/draft proposals; a rows call degrades to an empty batch
+            if shape == "array":
+                return "[]"
             return '{"fix": "lower_learning_rate", "reason": "model suggests LR reduction"}'
 
         else:
@@ -248,7 +293,7 @@ Rules:
 Goal: {goal}
 
 Return ONLY a JSON array of objects. No prose, no markdown."""
-        return self._call("patch", prompt, max_tokens=8192)
+        return self._call("patch", prompt, max_tokens=8192, timeout=180.0, shape="array")
 
     def log_call(self, model_key: str, tokens: int, latency: float, escalation_reason: str = None):
         """Log an LLM call for audit and cost tracking."""
