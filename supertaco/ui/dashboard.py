@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
-import plotly.graph_objects as go
+import plotly.graph_objects as go  # type: ignore[import-untyped]  # plotly ships no stubs
 import streamlit as st
 import yaml
 
@@ -108,7 +108,7 @@ def reset_session2():
 
 
 # ─── UI Components ────────────────────────────────────────────────
-def render_sidebar() -> Dict[str, any]:
+def render_sidebar() -> Dict[str, Any]:
     """Render the sidebar with controls and settings."""
     st.sidebar.title("⚙️ Controls")
 

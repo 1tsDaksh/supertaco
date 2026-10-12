@@ -33,11 +33,11 @@ class SandboxTuneSettings(BaseModel):
     """
 
     nebius_api_key: SecretStr = Field(
-        default="", description="Nebius AI Cloud / Token Factory API key"
+        default=SecretStr(""), description="Nebius AI Cloud / Token Factory API key"
     )
     nebius_project_id: str = Field(default="", description="Nebius project ID")
     tavily_api_key: SecretStr = Field(
-        default="", description="Tavily API key for error context lookup"
+        default=SecretStr(""), description="Tavily API key for error context lookup"
     )
     token_factory_base_url: str = Field(
         default="https://api.tokenfactory.nebius.com/v1",

@@ -15,7 +15,6 @@ dependencies = [
     "pydantic-settings>=2.6",
     "structlog>=24.4",
     "streamlit>=1.4",
-    "datasets>=3.0",
     "plotly>=5.0",
     "pyyaml>=6.0",
 ]

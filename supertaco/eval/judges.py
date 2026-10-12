@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 JUDGE_PROMPT = """You are a strict evaluation judge. Score the response from 0 to 10
 (10 = excellent, 0 = unusable). Reply with a single number only.
@@ -83,7 +83,12 @@ def compare_models(
     base_responses: dict, fine_tuned_responses: dict, prompts: list, llm=None
 ) -> dict:
     """Compare base vs fine-tuned responses across prompts."""
-    results = {"prompt_results": [], "base_total": 0.0, "ft_total": 0.0, "regression": False}
+    results: dict[str, Any] = {
+        "prompt_results": [],
+        "base_total": 0.0,
+        "ft_total": 0.0,
+        "regression": False,
+    }
     for prompt in prompts:
         base = score_response(prompt, base_responses.get(prompt, ""), llm=llm)
         ft = score_response(prompt, fine_tuned_responses.get(prompt, ""), llm=llm)

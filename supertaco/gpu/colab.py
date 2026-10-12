@@ -19,7 +19,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional, Sequence, Union
+from typing import Callable, Optional, Union
 
 DEFAULT_CLI = Path.home() / ".venv-colab" / "Scripts" / "colab.exe"
 
@@ -90,7 +90,7 @@ class TrainingOutcome:
     logs: list = field(default_factory=list)
 
 
-CliArg = Union[str, Sequence[str], None]
+CliArg = Union[str, list[str], tuple[str, ...], None]
 
 
 def resolve_cli(explicit: CliArg = None) -> list[str]:

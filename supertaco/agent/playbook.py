@@ -1,9 +1,17 @@
 import re
+from typing import Callable, TypedDict
 
 from supertaco.errors import ConfigurationError
 
+
+class _ModeSpec(TypedDict):
+    detection: Callable[[str], bool]
+    default_fix: str
+    description: str
+
+
 # Playbook v1 — 8 failure modes with typed detection signals and default fixes
-PLAYBOOK = {
+PLAYBOOK: dict[str, _ModeSpec] = {
     "NAN_LOSS": {
         "detection": lambda log: any(
             "loss" in line.lower() and re.search(r"\bnan\b", line, re.I)
