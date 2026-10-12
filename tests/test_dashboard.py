@@ -17,6 +17,10 @@ HEALTHY_LOG = (
     "step 32 loss 1.3245\ntraining finished\n"
 )
 NAN_LOG = "step 4 loss NaN\nstep 8 loss NaN\ntraining finished\n"
+OOM_CRASH = (
+    "Traceback (most recent call last):\n"
+    "RuntimeError: CUDA out of memory. Tried to allocate 2.00 GiB\n"
+)
 
 
 @pytest.fixture()
@@ -140,6 +144,59 @@ def test_success_flow_renders_report(app, monkeypatch, tmp_path):
     assert len(app.dataframe) >= 2  # attempt ledger + judge table
     assert len(app.metric) >= 3  # judge base / fine-tuned / improvement
     assert len(app.get("download_button")) == 1  # adapter artifact download
+
+
+def test_clean_first_attempt_says_no_heal_needed(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    result = app.session_state["run_result"]
+    assert result.success is True
+    assert result.attempts == 1
+    md = "\n".join(m.value for m in app.markdown)
+    assert "first attempt" in md
+    assert "Healed" not in md
+    assert app.session_state["run_active"] is False  # flag round-trips after the run
+
+
+def test_oom_crash_heal_says_healed_after_2_and_advisory_caption(app, monkeypatch):
+    _patch_run(
+        monkeypatch,
+        FakeTransport([(OOM_CRASH, None, "artifact download missing"), (HEALTHY_LOG, "ok", None)]),
+        FakeLLM(),
+    )
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    result = app.session_state["run_result"]
+    assert result.success is True
+    assert result.attempts == 2
+    md = "\n".join(m.value for m in app.markdown)
+    assert "Healed" in md
+    assert "after 2 attempt(s)" in md
+    assert result.attempt_ledger[0].failure_key == "OOM"
+    assert any("advisory" in c.value for c in app.caption)
+
+
+def test_run_in_progress_status_while_active(app, monkeypatch):
+    transport = FakeTransport([(HEALTHY_LOG, "ok", None)])
+    _patch_run(monkeypatch, transport, FakeLLM())
+
+    import streamlit as st
+
+    import supertaco.loop as loop_mod
+
+    seen = {}
+    real_loop = loop_mod.run_training_loop
+
+    def spy(*args, **kwargs):
+        seen["active"] = st.session_state.get("run_active")
+        return real_loop(*args, **kwargs)
+
+    monkeypatch.setattr(loop_mod, "run_training_loop", spy)
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    assert seen["active"] is True  # set before the blocking loop
+    assert app.session_state["run_active"] is False  # cleared in finally
 
 
 def test_nan_failure_heals_with_patch(app, monkeypatch):

@@ -77,6 +77,7 @@ def init_session2():
         "eval_results": None,
         "events": [],
         "run_result": None,
+        "run_active": False,
         "gpu_result": None,
         "gpu_lines": [],
     }
@@ -254,14 +255,20 @@ def render_report() -> None:
     st.markdown("### 📋 Training Report")
     result = st.session_state.get("run_result")
     if result is None:
-        st.info("Run the supervisor loop to see attempts, judge scores and config changes.")
+        if st.session_state.get("run_active"):
+            st.info("Run in progress - logs stream below...")
+        else:
+            st.info("Run the supervisor loop to see attempts, judge scores and config changes.")
         return
 
     if result.attempt_ledger:
-        st.markdown(
-            f"**Attempts used:** {result.attempts} — "
-            + ("✅ passed the judge" if result.success else f"❌ {result.error}")
-        )
+        if result.success and result.attempts == 1:
+            outcome = "✅ succeeded on first attempt - no heal needed"
+        elif result.success:
+            outcome = "✅ passed the judge"
+        else:
+            outcome = f"❌ {result.error}"
+        st.markdown(f"**Attempts used:** {result.attempts} — {outcome}")
         rows: dict[str, list] = {
             "attempt": [],
             "failure": [],
@@ -369,12 +376,24 @@ def _render_events(events: list) -> str:
         elif ev.type == "retry_scheduled":
             lines.append(f"🔁 relaunching (attempt {d['next_attempt']})")
         elif ev.type == "run_succeeded":
-            lines.append(f"✅ **Healed** after {d['attempts']} attempt(s)")
+            if d["attempts"] > 1:
+                lines.append(f"✅ **Healed** after {d['attempts']} attempt(s)")
+            else:
+                lines.append("✅ **Succeeded** on first attempt - no heal needed")
         elif ev.type == "run_failed":
             detail = f" · attempts {d['attempts']}" if d.get("attempts") is not None else ""
             last = f" · last `{d['path']}`" if d.get("path") else ""
             lines.append(f"🛑 **Failed**: {d['error']}{detail}{last}")
     return "\n\n".join(lines)
+
+
+def _render_timeline(slot, events: list) -> None:
+    """Render the event timeline plus an advisory caption once a patch is proposed."""
+    slot.markdown(_render_events(events))
+    if any(ev.type == "patch_proposed" for ev in events):
+        st.caption(
+            "Nemotron analysis is advisory - the applied patch is the deterministic playbook fix."
+        )
 
 
 def _loss_figure(events: list):
@@ -430,21 +449,25 @@ def execute_launch(config, max_retries, timeline_slot, logs_slot, chart_slot, pr
     def on_event(ev: Event) -> None:
         events.append(ev)
         st.session_state["events"] = events  # survive a mid-run crash (spec 6)
-        timeline_slot.markdown(_render_events(events))
+        _render_timeline(timeline_slot, events)
         if ev.type == "logs_produced":
             logs_slot.code(ev.data["text"], language="log")
             chart_slot.plotly_chart(_loss_figure(events), use_container_width=True)
 
-    result = run_training_loop(
-        config,
-        transport=ColabTransport(),
-        on_event=on_event,
-        on_line=on_line,
-        llm=make_llm(),
-        max_retries=max_retries,
-        runs_dir="configs/runs",
-        prompts=prompts,
-    )
+    st.session_state["run_active"] = True
+    try:
+        result = run_training_loop(
+            config,
+            transport=ColabTransport(),
+            on_event=on_event,
+            on_line=on_line,
+            llm=make_llm(),
+            max_retries=max_retries,
+            runs_dir="configs/runs",
+            prompts=prompts,
+        )
+    finally:
+        st.session_state["run_active"] = False
     return events, result
 
 
@@ -548,12 +571,12 @@ def main():
                     st.toast("✅ Run complete", icon="✅")
             except ConfigurationError as exc:
                 st.error(f"❌ {exc}")
-                timeline_slot.markdown(_render_events(st.session_state.get("events", [])))
+                _render_timeline(timeline_slot, st.session_state.get("events", []))
             except Exception as exc:  # spec 6: never a Streamlit traceback
                 st.error(f"❌ Run crashed: {exc}")
-                timeline_slot.markdown(_render_events(st.session_state.get("events", [])))
+                _render_timeline(timeline_slot, st.session_state.get("events", []))
         elif st.session_state.get("events"):
-            timeline_slot.markdown(_render_events(st.session_state["events"]))
+            _render_timeline(timeline_slot, st.session_state["events"])
             latest_logs = next(
                 (
                     e.data["text"]
