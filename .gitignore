@@ -40,6 +40,9 @@ configs/runs/*
 # Jupyter
 .ipynb_checkpoints/
 
+# Dev/agent working docs (local only)
+docs/
+
 # OS
 .DS_Store
 Thumbs.db
