@@ -128,7 +128,7 @@ and the planner emits exactly 5 judge prompts (the judge scores at most 5).
 ## Testing & validation
 
 ```bash
-python -m pytest tests/ -q                # 134 tests - transport and LLM faked, no network/credits
+python -m pytest tests/ -q                # 150 tests - transport and LLM faked, no network/credits
 python -m ruff check .                    # lint
 python -m ruff format --check supertaco tests
 python -m mypy supertaco/                 # 13 pre-existing findings (deferred)
@@ -136,18 +136,15 @@ python -m mypy supertaco/                 # 13 pre-existing findings (deferred)
 
 ## Documentation
 
-- [docs/AGENTS.md](docs/AGENTS.md) - behavioral rules, commands, cost guardrails
-- [docs/PROJECT.md](docs/PROJECT.md) - current state + changelog
-- [docs/HANDOFF.md](docs/HANDOFF.md) - architecture, invariants, live-run history, known issues
-- [docs/SPEC.md](docs/SPEC.md), [docs/CONVENTIONS.md](docs/CONVENTIONS.md),
-  [docs/STACK.md](docs/STACK.md)
 - [colab/README.md](colab/README.md) - Colab adapter details + manual browser fallback
 
 ## Status
 
-The real-loop implementation plan (14 tasks) is complete: live smoke on 2026-10-01 passed end
-to end (exit 0, `run_started -> run_succeeded` on attempt 1, judge mode `real`, VM stopped).
-Next up: demo video + submission write-up (deadline 2026-10-30).
+Goal-driven runs are live: type a plain-English goal, Nemotron plans the run, generates the
+synthetic dataset, trains on a Colab T4, self-heals failures (e.g. OOM -> halved batch +
+gradient checkpointing, relaunched automatically), and judges the result. Verified end to end
+on 2026-10-12 (fine-tuned 5.6 vs base 2.4; OOM healed in 2 attempts, no human input).
+Next up: demo video + submission (deadline 2026-10-30).
 
 ## License
 
