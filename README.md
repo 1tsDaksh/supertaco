@@ -128,10 +128,10 @@ and the planner emits exactly 5 judge prompts (the judge scores at most 5).
 ## Testing & validation
 
 ```bash
-python -m pytest tests/ -q                # 150 tests - transport and LLM faked, no network/credits
+python -m pytest tests/ -q                # 172 tests - transport and LLM faked, no network/credits
 python -m ruff check .                    # lint
 python -m ruff format --check supertaco tests
-python -m mypy supertaco/                 # 13 pre-existing findings (deferred)
+python -m mypy supertaco/                 # clean
 ```
 
 ## Documentation
