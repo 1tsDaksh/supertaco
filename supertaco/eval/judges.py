@@ -26,42 +26,48 @@ def _hash_score(prompt: str, response: str) -> float:
     return round(2.0 + (digest % 81) / 10, 2)  # 2.0 - 10.0
 
 
+def _parse_score(text: str) -> Optional[float]:
+    """Numerator of "8/10" wins; else the last number ("0 to 10" echoes lose)."""
+    fraction = re.search(r"(-?\d+(?:\.\d+)?)\s*(?:/|out of\s*)10\b", text)
+    if fraction:
+        return float(fraction.group(1))
+    numbers = re.findall(r"-?\d+(?:\.\d+)?", text)  # signed: "Score: -2" -> 0.0
+    return float(numbers[-1]) if numbers else None
+
+
 def score_response(
     prompt: str, response: str, llm=None, judge_model_key: str = "patch"
 ) -> JudgeResult:
     """Score one response. With an llm client: real Nemotron judge call.
 
-    Parse failure or missing client falls back to the deterministic hash;
-    the HTTP-level mode (real/fallback) is inherited from the client.
+    Parse failure retries the judge once (Nemotron occasionally emits empty
+    content); a second failure or missing client falls back to the
+    deterministic hash. HTTP-level mode (real/fallback) is inherited.
     """
     if llm is None:
         return JudgeResult(_hash_score(prompt, response), "hash", "no llm client")
 
-    text = llm._call(
-        judge_model_key,
-        JUDGE_PROMPT.format(prompt=prompt, response=response),
-        max_tokens=512,  # Nemotron-3 reasons before answering; 16 -> empty content -> hash
-        temperature=0.0,
+    judge_prompt = JUDGE_PROMPT.format(prompt=prompt, response=response)
+    text = ""
+    for _ in range(2):  # one retry on empty/unparseable reply, then hash
+        text = llm._call(
+            judge_model_key,
+            judge_prompt,
+            max_tokens=512,  # Nemotron-3 reasons before answering; 16 -> empty content
+            temperature=0.0,
+        )
+        http_mode = "real"
+        http_error = None
+        if llm.call_log:
+            http_mode = llm.call_log[-1].get("mode", "real")
+            http_error = llm.call_log[-1].get("error")
+        raw = _parse_score(text)
+        if raw is not None:
+            score = max(0.0, min(10.0, raw))
+            return JudgeResult(round(score, 2), http_mode, http_error)
+    return JudgeResult(
+        _hash_score(prompt, response), "hash", f"unparseable judge output: {text[:80]!r}"
     )
-    http_mode = "real"
-    http_error = None
-    if llm.call_log:
-        http_mode = llm.call_log[-1].get("mode", "real")
-        http_error = llm.call_log[-1].get("error")
-
-    # "8/10" or "8 out of 10" -> numerator; a trailing denominator must not win
-    fraction = re.search(r"(-?\d+(?:\.\d+)?)\s*(?:/|out of\s*)10\b", text)
-    if fraction:
-        raw = float(fraction.group(1))
-    else:
-        numbers = re.findall(r"-?\d+(?:\.\d+)?", text)  # signed: "Score: -2" -> 0.0
-        if not numbers:
-            return JudgeResult(
-                _hash_score(prompt, response), "hash", f"unparseable judge output: {text[:80]!r}"
-            )
-        raw = float(numbers[-1])  # last number: avoids "0 to 10" echoes
-    score = max(0.0, min(10.0, raw))
-    return JudgeResult(round(score, 2), http_mode, http_error)
 
 
 def compare_models(

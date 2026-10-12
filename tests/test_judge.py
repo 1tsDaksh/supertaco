@@ -38,10 +38,34 @@ def test_clamp_out_of_range():
 
 
 def test_unparseable_judge_output_falls_back_to_hash():
-    llm = FakeLLM(["no numbers here"])
+    llm = FakeLLM(["no numbers here", "still no numbers"])
     result = score_response("p", "r", llm=llm)
     assert result.mode == "hash"
     assert 2.0 <= result.score <= 10.0
+    assert len(llm.call_log) == 2  # one retry, then hash
+
+
+def test_empty_reply_retries_once_then_scores():
+    llm = FakeLLM(["", "7"])
+    result = score_response("p", "r", llm=llm)
+    assert result.score == 7.0
+    assert result.mode == "real"
+    assert len(llm.call_log) == 2
+
+
+def test_garbage_reply_retries_once_then_scores():
+    llm = FakeLLM(["no numbers here", "8/10"])
+    result = score_response("p", "r", llm=llm)
+    assert result.score == 8.0
+    assert result.mode == "real"
+    assert len(llm.call_log) == 2
+
+
+def test_valid_reply_does_not_retry():
+    llm = FakeLLM(["8"])
+    result = score_response("p", "r", llm=llm)
+    assert result.score == 8.0
+    assert len(llm.call_log) == 1
 
 
 def test_judge_requests_enough_tokens_for_reasoning_model():
