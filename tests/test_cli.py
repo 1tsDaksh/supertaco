@@ -1,6 +1,7 @@
 """CLI: run executes the real loop with an injected transport (tests fake it)."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -226,7 +227,7 @@ def test_plan_then_run_round_trip_threads_dataset_and_prompts(tmp_path, monkeypa
     assert "eval_prompts" not in transport.last_config
     assert transport.last_config["dataset"]["kind"] == "synthetic"
     assert len(transport.last_config["dataset"]["rows"]) == 150
-    assert transport.last_config["goal"] == "pirate chef"
+    assert "goal" not in transport.last_config  # planner metadata never reaches the loop
 
 
 def test_run_config_malformed_eval_prompts_falls_back_to_defaults(tmp_path, monkeypatch, capsys):
@@ -242,3 +243,52 @@ def test_run_config_malformed_eval_prompts_falls_back_to_defaults(tmp_path, monk
     )
     cli.run_config(str(path), llm=FakeLLM())
     assert transport.prompts == DEFAULT_PROMPTS
+
+
+def test_run_with_feedback_revises_and_writes_plan(tmp_path, monkeypatch, capsys):
+    cfg = {
+        "model": "qwen2.5-0.5b",
+        "learning_rate": 2e-4,
+        "batch_size": 4,
+        "lora_r": 8,
+        "lora_alpha": 16,
+        "lora_dropout": 0.05,
+        "num_epochs": 1,
+        "chat_template": "llama-3",
+        "goal": "pirate chef",
+        "eval_prompts": ["a", "b", "c", "d", "e"],
+        "dataset": {"kind": "hf", "hf_id": "x/y", "max_rows": 64},
+    }
+    path = tmp_path / "plan_x.yaml"
+    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    captured = {}
+
+    def fake_loop(config, **kwargs):
+        captured["config"] = config
+        captured["prompts"] = kwargs.get("prompts")
+        return SimpleNamespace(success=True, attempts=1, configs_written=["c1"])
+
+    monkeypatch.setattr(cli, "run_training_loop", fake_loop)
+    fake = SimpleNamespace(
+        revise_plan=lambda goal, plan_json, feedback: '{"num_epochs": 2, "note": "shorter"}'
+    )
+    monkeypatch.setattr(cli, "make_llm", lambda: fake)
+    runs_dir = tmp_path / "runs"
+    monkeypatch.setattr(cli, "RUNS_DIR", runs_dir)
+    cli.run_config(str(path), feedback="be more concise")
+    out = capsys.readouterr().out
+    assert "Revised plan written:" in out and "shorter" in out
+    assert captured["config"]["num_epochs"] == 2
+    assert "goal" not in captured["config"]
+    assert "revision_note" not in captured["config"]
+    assert captured["prompts"] == ["a", "b", "c", "d", "e"]
+    written = list(runs_dir.glob("plan_*_revised.yaml"))
+    assert len(written) == 1
+    assert yaml.safe_load(written[0].read_text(encoding="utf-8"))["revision_note"] == "shorter"
+
+
+def test_run_with_feedback_requires_goal(tmp_path):
+    path = tmp_path / "plain.yaml"
+    path.write_text(yaml.safe_dump({"model": "qwen2.5-0.5b"}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="goal"):
+        cli.run_config(str(path), llm=SimpleNamespace(), transport=object(), feedback="x")
