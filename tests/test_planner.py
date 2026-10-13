@@ -6,14 +6,17 @@ import pytest
 
 from supertaco.data import generate_dataset  # noqa: F401  (import sanity: planner uses it)
 from supertaco.eval.harness import DEFAULT_PROMPTS, PROMPT_SUITE_SIZE
+from supertaco.gpu.transport import resolve_model
 from supertaco.planner import (
     DatasetSpec,  # noqa: F401  (import sanity: planner exports it)
     RunPlan,  # noqa: F401  (import sanity: planner exports it)
     default_plan,
     materialize_dataset,
+    plan_from_config,
     plan_run,
     plan_to_config,
     revise_plan,
+    revise_run_config,
 )
 
 GOOD = {
@@ -312,3 +315,72 @@ def test_revise_plan_prompt_json_excludes_dataset_rows():
     assert cfg["dataset"] == {"kind": "synthetic", "max_rows": 256}  # rows stripped
     assert "row 0" not in plan_json  # training content never shipped to the model
     assert cfg["eval_prompts"] == plan.eval_prompts
+
+
+def test_plan_from_config_round_trips_plan_to_config():
+    plan = RunPlan(
+        model="qwen2.5-1.5b",
+        batch_size=2,
+        num_epochs=2,
+        dataset=DatasetSpec(kind="hf", hf_id="x/y", max_rows=100),
+        eval_prompts=["a", "b", "c", "d", "e"],
+    )
+    cfg = {**plan_to_config(plan), "goal": "g", "eval_prompts": list(plan.eval_prompts)}
+    rebuilt = plan_from_config(cfg)
+    assert rebuilt.model == resolve_model("qwen2.5-1.5b")
+    assert rebuilt.batch_size == 2 and rebuilt.num_epochs == 2
+    assert rebuilt.dataset.hf_id == "x/y"
+    assert rebuilt.eval_prompts == ["a", "b", "c", "d", "e"]
+
+
+def test_plan_from_config_defaults_on_garbage():
+    rebuilt = plan_from_config({"model": 42, "eval_prompts": "nope", "dataset": 7})
+    assert rebuilt.model == resolve_model("qwen2.5-0.5b")  # dropped -> default, canonicalized
+    assert rebuilt.dataset.kind == "hf"  # default_factory spec
+    assert len(rebuilt.eval_prompts) == PROMPT_SUITE_SIZE
+
+
+class _RowLLM(_ReviseLLM):
+    """ReviseLLM that also serves generate_dataset chunks (valid alpaca rows)."""
+
+    def __init__(self, reply):
+        super().__init__(reply)
+        self.n = 0
+        self.last_goal = None
+
+    def generate_rows(self, goal, count, banned):
+        self.last_goal = goal
+        rows = []
+        for _ in range(count):
+            self.n += 1
+            rows.append({"instruction": f"i1 step {self.n}", "input": "", "output": "o1 answer"})
+        return json.dumps(rows)
+
+
+def test_revise_run_config_regenerates_synthetic_rows_with_refined_goal():
+    llm = _RowLLM('{"note": "tighter"}')
+    cfg = {
+        **plan_to_config(RunPlan(dataset=DatasetSpec(kind="synthetic"))),
+        "goal": "pirate chef",
+        "eval_prompts": ["a", "b", "c", "d", "e"],
+    }
+    new_cfg, revised = revise_run_config("be more concise", cfg, "pirate chef", llm)
+    assert "Additional user feedback: be more concise" in llm.last_goal
+    assert revised.dataset.rows and revised.dataset.rows[0]["instruction"] == "i1 step 1"
+    assert new_cfg["revision_note"] == "tighter"
+    assert new_cfg["goal"] == "pirate chef"
+    assert new_cfg["eval_prompts"] == ["a", "b", "c", "d", "e"]
+
+
+def test_revise_run_config_keeps_hf_dataset_untouched():
+    llm = _ReviseLLM('{"num_epochs": 2}')
+    ds = {"kind": "hf", "hf_id": "x/y", "max_rows": 100}
+    cfg = {
+        **plan_to_config(RunPlan()),
+        "goal": "g",
+        "eval_prompts": ["a", "b", "c", "d", "e"],
+        "dataset": ds,
+    }
+    new_cfg, revised = revise_run_config("more data please", cfg, "g", llm)
+    assert new_cfg["dataset"]["hf_id"] == "x/y"  # kept, no generation
+    assert not hasattr(llm, "last_goal")  # generate_rows never called

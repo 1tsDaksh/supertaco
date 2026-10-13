@@ -6,7 +6,7 @@ import json
 import math
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from supertaco.data import generate_dataset
 from supertaco.errors import ConfigurationError
@@ -223,3 +223,54 @@ def materialize_dataset(plan: RunPlan, goal: str, llm: Any) -> RunPlan:
             ),
         )
     return plan
+
+
+def plan_from_config(config: dict) -> RunPlan:
+    """Rebuild a RunPlan from a config dict (plan yaml or dashboard session state).
+
+    Values are validated per field so garbage entries are dropped instead of
+    raising (G8); anything rejected keeps its default.
+    """
+    fields = {}
+    for key, value in config.items():
+        if key in RunPlan.model_fields and key not in _EXCLUDED_BLOB_KEYS:
+            try:
+                fields[key] = getattr(RunPlan.model_validate({key: value}), key)
+            except ValidationError:
+                continue
+    plan = RunPlan(**fields)
+    raw_ds = config.get("dataset")
+    if isinstance(raw_ds, dict):
+        try:
+            plan.dataset = DatasetSpec(
+                **{k: v for k, v in raw_ds.items() if k in DatasetSpec.model_fields}
+            )
+        except ValidationError:
+            pass  # malformed dataset spec -> keep the default (G8)
+    prompts = config.get("eval_prompts")
+    if isinstance(prompts, list) and all(isinstance(p, str) and p.strip() for p in prompts):
+        plan.eval_prompts = list(prompts)
+    _validate_model(plan)
+    _clamp(plan)
+    plan.batch_size = _cap_batch_for_model(plan.model, plan.batch_size)
+    _validate_prompts(plan)
+    return plan
+
+
+def revise_run_config(feedback: str, config: dict, goal: str, llm: Any) -> tuple[dict, RunPlan]:
+    """Feedback -> revised plan -> (config dict, plan). Shared by CLI and dashboard.
+
+    Synthetic datasets regenerate rows from the refined goal (style feedback needs
+    new data); hf datasets are kept as-is. Never raises.
+    """
+    plan = plan_from_config(config)
+    revised = revise_plan(feedback, plan, goal, llm)
+    if revised.dataset.kind == "synthetic":
+        refined_goal = f"{goal}. Additional user feedback: {feedback}"
+        revised = materialize_dataset(revised, refined_goal, llm)
+    new_config = plan_to_config(revised)
+    new_config["goal"] = goal
+    new_config["eval_prompts"] = list(revised.eval_prompts)
+    if revised.revision_note:
+        new_config["revision_note"] = revised.revision_note
+    return new_config, revised
