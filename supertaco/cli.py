@@ -17,7 +17,7 @@ import yaml
 
 from supertaco.errors import ConfigurationError
 from supertaco.loop import make_llm, run_training_loop
-from supertaco.planner import materialize_dataset, plan_run, plan_to_config
+from supertaco.planner import materialize_dataset, plan_run, plan_to_config, revise_run_config
 
 RUNS_DIR = Path("configs/runs")
 
@@ -91,6 +91,10 @@ def run_config(config_path: str, llm=None, transport=None, feedback: str | None 
     monkeypatching _make_transport. With feedback, the plan is revised
     (Nemotron), written as *_revised.yaml, then trained.
     """
+    if feedback is not None:
+        feedback = feedback.strip()
+        if not feedback:
+            raise SystemExit("--feedback is empty; describe what to change")
     try:
         config = _load_config(config_path)
     except (OSError, yaml.YAMLError) as exc:
@@ -104,8 +108,6 @@ def run_config(config_path: str, llm=None, transport=None, feedback: str | None 
             raise SystemExit(
                 "--feedback needs a config produced by `supertaco plan` (missing goal key)"
             )
-        from supertaco.planner import revise_run_config
-
         config, revised = revise_run_config(feedback, config, goal.strip(), llm)
         path = _write_plan_yaml(config, "_revised")
         print(f"Revised plan written: {path} (mode={revised.plan_mode})")

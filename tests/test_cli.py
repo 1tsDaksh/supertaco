@@ -292,3 +292,11 @@ def test_run_with_feedback_requires_goal(tmp_path):
     path.write_text(yaml.safe_dump({"model": "qwen2.5-0.5b"}), encoding="utf-8")
     with pytest.raises(SystemExit, match="goal"):
         cli.run_config(str(path), llm=SimpleNamespace(), transport=object(), feedback="x")
+
+
+@pytest.mark.parametrize("feedback", ["", "   ", "\t \n"])
+def test_run_rejects_blank_feedback(tmp_path, feedback):
+    path = tmp_path / "plain.yaml"
+    path.write_text(yaml.safe_dump({"model": "qwen2.5-0.5b"}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="feedback is empty"):
+        cli.run_config(str(path), llm=SimpleNamespace(), transport=object(), feedback=feedback)

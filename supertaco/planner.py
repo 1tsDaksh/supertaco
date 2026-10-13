@@ -102,7 +102,7 @@ def _validate_model(plan: RunPlan) -> None:
     try:
         plan.model = resolve_model(plan.model)
     except ConfigurationError:
-        plan.model = "qwen2.5-0.5b"
+        plan.model = resolve_model("qwen2.5-0.5b")
 
 
 def _cap_batch_for_model(model: str, batch: int) -> int:

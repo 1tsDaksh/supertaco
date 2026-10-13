@@ -61,10 +61,10 @@ def test_plan_run_clamps_and_fixes_bad_values():
         eval_prompts=["only", "three"],
     )
     plan = plan_run("x", _LLM(json.dumps(bad)))
-    assert plan.model == "qwen2.5-0.5b"  # not whitelisted -> default
+    assert plan.model == "Qwen/Qwen2.5-0.5B-Instruct"  # not whitelisted -> fallback, canonicalized
     assert plan.learning_rate == pytest.approx(1e-3)  # clamped to upper bound
     assert plan.num_epochs == 3
-    assert plan.batch_size == 16
+    assert plan.batch_size == 8  # clamped to 16, then the 0.5B T4 cap
     assert plan.eval_prompts == DEFAULT_PROMPTS  # wrong count -> defaults
 
 
@@ -240,8 +240,8 @@ def test_revise_plan_clamps_and_validates_like_plan_run():
     plan = RunPlan()
     llm = _ReviseLLM('{"batch_size": 999, "model": "not-a-model", "eval_prompts": ["x"]}')
     revised = revise_plan("f", plan, "g", llm)
-    assert revised.batch_size == 16  # clamped to the T4 range; same as plan_run (alias skips cap)
-    assert revised.model == "qwen2.5-0.5b"  # _validate_model fallback
+    assert revised.batch_size == 8  # clamped to 16, then the 0.5B T4 cap (same as plan_run)
+    assert revised.model == "Qwen/Qwen2.5-0.5B-Instruct"  # _validate_model fallback, canonicalized
     assert len(revised.eval_prompts) == PROMPT_SUITE_SIZE  # wrong count -> defaults
 
     capped = revise_plan("f", plan, "g", _ReviseLLM('{"batch_size": 999, "model": "qwen2.5-3b"}'))
