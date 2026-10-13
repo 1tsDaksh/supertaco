@@ -119,6 +119,32 @@ def _validate_prompts(plan: RunPlan) -> None:
         plan.eval_prompts = list(DEFAULT_PROMPTS)
 
 
+_EXCLUDED_BLOB_KEYS = ("dataset", "plan_mode", "revision_note")
+
+
+def _finalize_plan(blob: dict, prior: RunPlan | None = None) -> RunPlan:
+    """Build a validated RunPlan from a parsed reply blob (G10 clamps, caps, G8 prompts).
+
+    With prior, knobs the reply omits seed from that plan (a partial feedback
+    revision keeps what the model did not change); prior=None plans from defaults.
+    """
+    base = prior.model_dump(exclude=set(_EXCLUDED_BLOB_KEYS)) if prior is not None else {}
+    fields = {
+        **base,
+        **{k: blob[k] for k in blob if k in RunPlan.model_fields and k not in _EXCLUDED_BLOB_KEYS},
+    }
+    plan = RunPlan(**fields, plan_mode="real")
+    if "dataset" in blob:
+        plan.dataset = _dataset_spec(blob["dataset"])
+    elif prior is not None:
+        plan.dataset = prior.dataset.model_copy(deep=True)
+    _validate_model(plan)
+    _clamp(plan)
+    plan.batch_size = _cap_batch_for_model(plan.model, plan.batch_size)
+    _validate_prompts(plan)
+    return plan
+
+
 def plan_run(goal: str, llm: Any) -> RunPlan:
     """Ask Nemotron for a run plan; validate/clamp it, falling back to defaults.
 
@@ -126,19 +152,7 @@ def plan_run(goal: str, llm: Any) -> RunPlan:
     """
     try:
         blob = _extract_json(str(llm.plan_goal(goal)))
-        fields = {
-            k: blob[k]
-            for k in blob
-            if k in RunPlan.model_fields and k not in ("dataset", "plan_mode")
-        }
-        plan = RunPlan(**fields, plan_mode="real")
-        if "dataset" in blob:
-            plan.dataset = _dataset_spec(blob["dataset"])
-        _validate_model(plan)
-        _clamp(plan)
-        plan.batch_size = _cap_batch_for_model(plan.model, plan.batch_size)
-        _validate_prompts(plan)
-        return plan
+        return _finalize_plan(blob)
     except Exception:
         return default_plan()
 
@@ -149,32 +163,23 @@ def revise_plan(feedback: str, plan: RunPlan, goal: str, llm: Any) -> RunPlan:
     Same JSON schema and validation pipeline as plan_run; on any failure the
     previous plan is returned unchanged, flagged plan_mode="fallback".
     """
-    plan_json = json.dumps({**plan_to_config(plan), "eval_prompts": plan.eval_prompts})
     try:
+        cfg = plan_to_config(plan)
+        cfg["dataset"] = {k: v for k, v in cfg["dataset"].items() if k != "rows"}
+        cfg["eval_prompts"] = plan.eval_prompts
+        plan_json = json.dumps(cfg)
         blob = _extract_json(str(llm.revise_plan(goal, plan_json, feedback)))
-        fields = {
-            k: blob[k]
-            for k in blob
-            if k in RunPlan.model_fields and k not in ("dataset", "plan_mode", "revision_note")
-        }
-        revised = RunPlan(**fields, plan_mode="real")
+        revised = _finalize_plan(blob, prior=plan)
         note = blob.get("note")
         revised.revision_note = note.strip() if isinstance(note, str) and note.strip() else None
-        if "dataset" in blob:
-            revised.dataset = _dataset_spec(blob["dataset"])
-        else:
-            revised.dataset = plan.dataset.model_copy()
-        _validate_model(revised)
-        _clamp(revised)
-        revised.batch_size = _cap_batch_for_model(revised.model, revised.batch_size)
-        _validate_prompts(revised)
         return revised
     except Exception:
         return plan.model_copy(
+            deep=True,
             update={
                 "plan_mode": "fallback",
-                "revision_note": "feedback revision unparseable - keeping the previous plan",
-            }
+                "revision_note": "feedback revision failed - keeping the previous plan",
+            },
         )
 
 

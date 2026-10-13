@@ -82,6 +82,12 @@ def test_plan_run_falls_back_when_llm_raises():
     assert plan.plan_mode == "fallback"
 
 
+def test_plan_run_ignores_revision_note_in_reply():
+    plan = plan_run("x", _LLM(json.dumps(dict(GOOD, revision_note="sneaky"))))
+    assert plan.plan_mode == "real"
+    assert plan.revision_note is None
+
+
 def test_plan_to_config_contains_knobs_and_dataset_not_prompts():
     plan = plan_run("x", _LLM(json.dumps(GOOD)))
     cfg = plan_to_config(plan)
@@ -245,6 +251,7 @@ def test_revise_plan_unparseable_keeps_previous_plan_flagged():
     revised = revise_plan("f", plan, "g", _ReviseLLM("not json at all"))
     assert revised.batch_size == 2  # previous plan preserved
     assert revised.plan_mode == "fallback"
+    assert "revision failed" in (revised.revision_note or "")
     assert "keeping the previous plan" in (revised.revision_note or "")
 
 
@@ -258,3 +265,50 @@ def test_revise_plan_without_dataset_key_keeps_existing_dataset():
     assert revised.dataset.kind == "synthetic"
     assert revised.dataset.rows == plan.dataset.rows
     assert revised.num_epochs == 2
+
+
+def test_revise_plan_partial_reply_keeps_prior_knobs():
+    plan = RunPlan(
+        batch_size=4,
+        learning_rate=5e-4,
+        lora_r=16,
+        num_epochs=2,
+        eval_prompts=[f"prior {i}" for i in range(5)],
+    )
+    llm = _ReviseLLM('{"batch_size": 2, "note": "half the batch"}')
+    revised = revise_plan("f", plan, "g", llm)
+    assert revised.plan_mode == "real"
+    assert revised.batch_size == 2
+    assert revised.learning_rate == pytest.approx(5e-4)
+    assert revised.lora_r == 16
+    assert revised.num_epochs == 2
+    assert revised.eval_prompts == plan.eval_prompts
+    assert revised.revision_note == "half the batch"
+
+
+def test_revise_plan_fallback_does_not_alias_prior_plan():
+    plan = RunPlan(
+        batch_size=2,
+        dataset=DatasetSpec(
+            kind="synthetic", rows=[{"instruction": "a", "input": "", "output": "b"}]
+        ),
+        eval_prompts=[f"prior {i}" for i in range(5)],
+    )
+    revised = revise_plan("f", plan, "g", _ReviseLLM("not json at all"))
+    assert revised.plan_mode == "fallback"
+    assert revised.batch_size == 2
+    assert revised.dataset is not plan.dataset
+    assert revised.dataset.rows is not plan.dataset.rows
+    assert revised.eval_prompts is not plan.eval_prompts
+
+
+def test_revise_plan_prompt_json_excludes_dataset_rows():
+    rows = [{"instruction": f"row {n}", "input": "", "output": "o"} for n in range(40)]
+    plan = RunPlan(dataset=DatasetSpec(kind="synthetic", rows=rows))
+    llm = _ReviseLLM('{"num_epochs": 2}')
+    revise_plan("f", plan, "g", llm)
+    plan_json = llm.calls[0][1]
+    cfg = json.loads(plan_json)
+    assert cfg["dataset"] == {"kind": "synthetic", "max_rows": 256}  # rows stripped
+    assert "row 0" not in plan_json  # training content never shipped to the model
+    assert cfg["eval_prompts"] == plan.eval_prompts
