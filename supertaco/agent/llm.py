@@ -295,6 +295,28 @@ Goal: {goal}
 Return ONLY a JSON array of objects. No prose, no markdown."""
         return self._call("patch", prompt, max_tokens=8192, timeout=180.0, shape="array")
 
+    def revise_plan(self, goal: str, plan_json: str, feedback: str) -> str:
+        """Ask the super model to revise a run plan from user feedback (same JSON schema)."""
+        prompt = f"""You are a fine-tuning planner. The user reviewed a run plan and gave feedback.
+Return ONE revised JSON object with exactly these keys:
+"model" (one of: qwen2.5-0.5b, qwen2.5-1.5b, qwen2.5-3b, tinyllama-1.1b),
+"learning_rate", "batch_size", "lora_r", "lora_alpha", "lora_dropout", "num_epochs",
+"dataset" (object: {{"kind": "synthetic"}} when training rows should be written from the goal,
+or {{"kind": "hf", "id": "<huggingface-dataset-id>", "rows": <int>}} when the goal names a \
+public dataset),
+"eval_prompts" (a JSON array of exactly 5 strings, each testing a skill the goal requires),
+"note" (one sentence: what you changed and why).
+Adjust knobs only if training intensity should change; style feedback is handled by \
+regenerating synthetic data from the refined goal, so keep "dataset" unchanged unless the \
+data source itself is wrong.
+
+Original goal: {goal}
+Current plan: {plan_json}
+User feedback: {feedback}
+
+Return ONLY the JSON object. No prose, no markdown."""
+        return self._call("patch", prompt)
+
     def log_call(
         self, model_key: str, tokens: int, latency: float, escalation_reason: str | None = None
     ):

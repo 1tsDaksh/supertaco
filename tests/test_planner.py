@@ -5,13 +5,15 @@ import json
 import pytest
 
 from supertaco.data import generate_dataset  # noqa: F401  (import sanity: planner uses it)
-from supertaco.eval.harness import DEFAULT_PROMPTS
+from supertaco.eval.harness import DEFAULT_PROMPTS, PROMPT_SUITE_SIZE
 from supertaco.planner import (
+    DatasetSpec,  # noqa: F401  (import sanity: planner exports it)
     RunPlan,  # noqa: F401  (import sanity: planner exports it)
     default_plan,
     materialize_dataset,
     plan_run,
     plan_to_config,
+    revise_plan,
 )
 
 GOOD = {
@@ -201,3 +203,58 @@ def test_plan_caps_batch_for_3b_model():
 def test_plan_keeps_batch_for_small_model():
     plan = plan_run("x", _LLM(json.dumps(dict(GOOD, model="qwen2.5-0.5b", batch_size=8))))
     assert plan.batch_size == 8  # cap >= requested batch: unchanged
+
+
+class _ReviseLLM:
+    def __init__(self, reply):
+        self._reply = reply
+        self.calls = []
+
+    def revise_plan(self, goal, plan_json, feedback):
+        self.calls.append((goal, plan_json, feedback))
+        return self._reply
+
+
+def test_revise_plan_updates_knobs_and_captures_note():
+    plan = RunPlan(batch_size=4, num_epochs=1)
+    llm = _ReviseLLM('{"batch_size": 2, "num_epochs": 2, "note": "lighter, shorter"}')
+    revised = revise_plan("be more concise", plan, "pirate chef", llm)
+    assert revised.batch_size == 2 and revised.num_epochs == 2
+    assert revised.revision_note == "lighter, shorter"
+    assert revised.plan_mode == "real"
+    goal, plan_json, feedback = llm.calls[0]
+    assert goal == "pirate chef" and feedback == "be more concise"
+    assert '"batch_size": 4' in plan_json
+
+
+def test_revise_plan_clamps_and_validates_like_plan_run():
+    plan = RunPlan()
+    llm = _ReviseLLM('{"batch_size": 999, "model": "not-a-model", "eval_prompts": ["x"]}')
+    revised = revise_plan("f", plan, "g", llm)
+    assert revised.batch_size == 16  # clamped to the T4 range; same as plan_run (alias skips cap)
+    assert revised.model == "qwen2.5-0.5b"  # _validate_model fallback
+    assert len(revised.eval_prompts) == PROMPT_SUITE_SIZE  # wrong count -> defaults
+
+    capped = revise_plan("f", plan, "g", _ReviseLLM('{"batch_size": 999, "model": "qwen2.5-3b"}'))
+    assert capped.model == "Qwen/Qwen2.5-3B-Instruct"
+    assert capped.batch_size == 2  # T4 model x batch cap applied
+
+
+def test_revise_plan_unparseable_keeps_previous_plan_flagged():
+    plan = RunPlan(batch_size=2, revision_note=None)
+    revised = revise_plan("f", plan, "g", _ReviseLLM("not json at all"))
+    assert revised.batch_size == 2  # previous plan preserved
+    assert revised.plan_mode == "fallback"
+    assert "keeping the previous plan" in (revised.revision_note or "")
+
+
+def test_revise_plan_without_dataset_key_keeps_existing_dataset():
+    plan = RunPlan(
+        dataset=DatasetSpec(
+            kind="synthetic", rows=[{"instruction": "a", "input": "", "output": "b"}]
+        )
+    )
+    revised = revise_plan("f", plan, "g", _ReviseLLM('{"num_epochs": 2}'))
+    assert revised.dataset.kind == "synthetic"
+    assert revised.dataset.rows == plan.dataset.rows
+    assert revised.num_epochs == 2

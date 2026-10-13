@@ -223,6 +223,24 @@ def test_plan_goal_prompt_and_return(monkeypatch, tmp_path):
     assert client.call_log[-1]["mode"] == "real"
 
 
+def test_revise_plan_prompt_carries_goal_plan_and_feedback(monkeypatch):
+    client = _client()
+    seen = {}
+
+    def fake(self, model_id, prompt, max_tokens, temperature, timeout):
+        seen["prompt"] = prompt
+        return '{"note": "ok"}', 10
+
+    monkeypatch.setattr(NemotronClient, "_http_call", fake)
+    out = client.revise_plan("pirate chef", '{"batch_size": 4}', "be more concise")
+    assert out == '{"note": "ok"}'
+    assert "pirate chef" in seen["prompt"]
+    assert "be more concise" in seen["prompt"]
+    assert '"batch_size": 4' in seen["prompt"]
+    assert "eval_prompts" in seen["prompt"] and "note" in seen["prompt"]
+    assert client.call_log[-1]["model_key"] == "patch"
+
+
 def test_generate_rows_prompt_and_return(monkeypatch, tmp_path):
     client = _client()
     seen = {}

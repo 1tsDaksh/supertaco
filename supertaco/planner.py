@@ -40,6 +40,7 @@ class RunPlan(BaseModel):
     )
     eval_prompts: list[str] = Field(default_factory=lambda: list(DEFAULT_PROMPTS))
     plan_mode: str = "real"  # "real" | "fallback"
+    revision_note: Optional[str] = None
 
 
 def default_plan() -> RunPlan:
@@ -140,6 +141,41 @@ def plan_run(goal: str, llm: Any) -> RunPlan:
         return plan
     except Exception:
         return default_plan()
+
+
+def revise_plan(feedback: str, plan: RunPlan, goal: str, llm: Any) -> RunPlan:
+    """Revise a plan from free-text feedback; never raises (keeps the prior plan).
+
+    Same JSON schema and validation pipeline as plan_run; on any failure the
+    previous plan is returned unchanged, flagged plan_mode="fallback".
+    """
+    plan_json = json.dumps({**plan_to_config(plan), "eval_prompts": plan.eval_prompts})
+    try:
+        blob = _extract_json(str(llm.revise_plan(goal, plan_json, feedback)))
+        fields = {
+            k: blob[k]
+            for k in blob
+            if k in RunPlan.model_fields and k not in ("dataset", "plan_mode", "revision_note")
+        }
+        revised = RunPlan(**fields, plan_mode="real")
+        note = blob.get("note")
+        revised.revision_note = note.strip() if isinstance(note, str) and note.strip() else None
+        if "dataset" in blob:
+            revised.dataset = _dataset_spec(blob["dataset"])
+        else:
+            revised.dataset = plan.dataset.model_copy()
+        _validate_model(revised)
+        _clamp(revised)
+        revised.batch_size = _cap_batch_for_model(revised.model, revised.batch_size)
+        _validate_prompts(revised)
+        return revised
+    except Exception:
+        return plan.model_copy(
+            update={
+                "plan_mode": "fallback",
+                "revision_note": "feedback revision unparseable - keeping the previous plan",
+            }
+        )
 
 
 def plan_to_config(plan: RunPlan) -> dict:
