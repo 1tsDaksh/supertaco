@@ -69,6 +69,9 @@ supertaco run configs/defaults/colab_t4.yaml
 supertaco plan "answer like a pirate chef"
 supertaco run configs/runs/plan_<ts>.yaml
 
+# Optional: after a run, iterate with free-text feedback
+supertaco run configs/runs/plan_<ts>.yaml --feedback "be more concise"
+
 # Dashboard: config editor, live timeline + loss chart, attempt-ledger report
 streamlit run supertaco/ui/dashboard.py --server.headless true --server.port 8510
 ```
@@ -104,6 +107,10 @@ Instead of the static config, describe what you want the model to learn:
 - **CLI:** `supertaco plan "answer like a pirate chef"` writes a reviewable
   `configs/runs/plan_<ts>.yaml`; inspect it, then
   `supertaco run configs/runs/plan_<ts>.yaml`.
+- **Iterate:** `supertaco run <plan>.yaml --feedback "be more concise"` (or the dashboard's
+  feedback box after a run) — Nemotron revises the plan (same clamps, never-raise fallback),
+  synthetic data regenerates from the refined goal, and the report shows the before→after
+  judge delta. Each revision is written to `configs/runs/plan_<ts>_revised.yaml` for audit.
 
 The planner is a single Nemotron (super) call (synthetic datasets add a few row-generation
 calls); unparseable replies fall back to the shipped defaults (the CLI prints `mode=fallback`;
@@ -128,7 +135,7 @@ and the planner emits exactly 5 judge prompts (the judge scores at most 5).
 ## Testing & validation
 
 ```bash
-python -m pytest tests/ -q                # 172 tests - transport and LLM faked, no network/credits
+python -m pytest tests/ -q                # 199 tests - transport and LLM faked, no network/credits
 python -m ruff check .                    # lint
 python -m ruff format --check supertaco tests
 python -m mypy supertaco/                 # clean
