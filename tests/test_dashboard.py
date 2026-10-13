@@ -550,6 +550,26 @@ def _seed_plan_keys(app):
     app.session_state["plan_prompts"] = ["a", "b", "c", "d", "e"]
 
 
+def _prev_result(ft_scores, modes):
+    """A LoopResult standing in for a stashed pre-feedback run."""
+    return LoopResult(
+        success=True,
+        attempts=1,
+        final_config={},
+        configs_written=[],
+        failure_key=None,
+        error=None,
+        llm_calls=[],
+        eval_results={
+            "prompts": [f"p{i}" for i in range(len(modes))],
+            "base_scores": [1.0] * len(modes),
+            "fine_tuned_scores": ft_scores,
+            "modes": modes,
+            "regression_flagged": False,
+        },
+    )
+
+
 def _patch_feedback(monkeypatch, *, plan_mode="real", note="shorter, tighter"):
     """Fake revise_run_config + capture the config the re-run receives."""
     import supertaco.loop as loop_mod
@@ -711,21 +731,8 @@ def test_report_shows_before_after_delta(app, monkeypatch):
     _launch(app)
     assert not app.exception, [e.value for e in app.exception]
     # this run's ft avg is 9.00 (FakeLLM); pretend the pre-feedback run scored 3.00
-    app.session_state["prev_run_result"] = LoopResult(
-        success=True,
-        attempts=1,
-        final_config={},
-        configs_written=[],
-        failure_key=None,
-        error=None,
-        llm_calls=[],
-        eval_results={
-            "prompts": ["p1", "p2"],
-            "base_scores": [1.0, 1.0],
-            "fine_tuned_scores": [3.0, 3.0],
-            "modes": ["base:real / ft:real", "base:real / ft:real"],
-            "regression_flagged": False,
-        },
+    app.session_state["prev_run_result"] = _prev_result(
+        [3.0, 3.0], ["base:real / ft:real", "base:real / ft:real"]
     )
     app.run()
     assert not app.exception, [e.value for e in app.exception]
@@ -733,3 +740,62 @@ def test_report_shows_before_after_delta(app, monkeypatch):
         "Before feedback: fine-tuned avg 3.00 -> after: 9.00 (+6.00)" in c.value
         for c in app.caption
     )
+
+
+def test_manual_rerun_after_feedback_clears_delta_caption(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+
+    _seed_plan_keys(app)
+    _patch_feedback(monkeypatch)
+    app.run()
+
+    fb = next(ta for ta in app.text_area if ta.label == "Feedback on the result")
+    fb.set_value("be more concise")
+    next(b for b in app.button if "Re-run with feedback" in b.label).click().run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert any("Before feedback:" in c.value for c in app.caption)
+
+    # a MANUAL run is not feedback-driven: the baseline must be invalidated
+    next(b for b in app.button if "Fine-tune on Colab" in b.label).click().run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert not any("Before feedback:" in c.value for c in app.caption)
+    assert app.session_state["prev_run_result"] is None
+
+
+def test_delta_hidden_when_prev_judge_not_real_or_scores_empty(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    real_modes = ["base:real / ft:real", "base:real / ft:real"]
+
+    app.session_state["prev_run_result"] = _prev_result([3.0, 3.0], ["base:real / ft:hash"] * 2)
+    app.run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert not any("Before feedback:" in c.value for c in app.caption)
+
+    app.session_state["prev_run_result"] = _prev_result([], real_modes)
+    app.run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert not any("Before feedback:" in c.value for c in app.caption)
+
+    # control: all-real prev with scores renders the caption again
+    app.session_state["prev_run_result"] = _prev_result([3.0, 3.0], real_modes)
+    app.run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert any("Before feedback:" in c.value for c in app.caption)
+
+
+def test_delta_hidden_when_current_judge_not_real(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), UnparseableJudgeLLM())
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    app.session_state["prev_run_result"] = _prev_result(
+        [3.0, 3.0], ["base:real / ft:real", "base:real / ft:real"]
+    )
+    app.run()
+    assert not app.exception, [e.value for e in app.exception]
+    judge_df = next(df for df in app.dataframe if "judge" in df.value.columns)
+    assert all("hash" in str(m) for m in judge_df.value["judge"])  # current run is hash-mode
+    assert not any("Before feedback:" in c.value for c in app.caption)

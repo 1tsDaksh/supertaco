@@ -322,8 +322,15 @@ def render_report() -> None:
         col2.metric("Judge: fine-tuned", f"{ft_avg:.2f}")
         col3.metric("Improvement", f"{ft_avg - base_avg:+.2f}")
         prev = st.session_state.get("prev_run_result")
-        if prev and prev.eval_results and results["fine_tuned_scores"]:
-            prev_scores = prev.eval_results["fine_tuned_scores"]
+        prev_eval = prev.eval_results if prev else None
+        prev_scores = (prev_eval or {}).get("fine_tuned_scores") or []
+        prev_modes = (prev_eval or {}).get("modes") or []
+        if (
+            prev_scores
+            and results["fine_tuned_scores"]
+            and all("hash" not in m and "fallback" not in m for m in results["modes"])
+            and all("hash" not in m and "fallback" not in m for m in prev_modes)
+        ):
             prev_ft = sum(prev_scores) / len(prev_scores)
             st.caption(
                 f"Before feedback: fine-tuned avg {prev_ft:.2f} -> after: {ft_avg:.2f} "
@@ -641,6 +648,8 @@ def main():
                 if st.session_state.get("plan_dataset"):
                     cfg_for_run["dataset"] = dict(st.session_state["plan_dataset"])
                 run_clicked = True
+        elif run_clicked:
+            st.session_state["prev_run_result"] = None
 
     # ── Right Column: Monitor & Metrics ────────────────────────────
     with st.container(border=True):
