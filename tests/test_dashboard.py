@@ -9,6 +9,7 @@ import yaml
 from streamlit.testing.v1 import AppTest
 
 from supertaco.eval.harness import DEFAULT_PROMPTS, RESPONSES_END, RESPONSES_START
+from supertaco.loop import LoopResult
 
 REPO = Path(__file__).resolve().parents[1]
 DASHBOARD = REPO / "supertaco" / "ui" / "dashboard.py"
@@ -533,3 +534,202 @@ def test_plan_fallback_shows_warning(app, monkeypatch):
     assert any('Planned for: "g"' in w.value for w in app.warning)
     assert app.session_state["plan_goal"] == "g"
     assert app.session_state["plan_prompts"] == DEFAULT_PROMPTS
+
+
+def test_feedback_ui_hidden_without_run_result(app):
+    assert not any("Re-run with feedback" in b.label for b in app.button)
+    assert not any(ta.label == "Feedback on the result" for ta in app.text_area)
+
+
+def _seed_plan_keys(app):
+    app.session_state["plan_goal"] = "pirate chef"
+    app.session_state["plan_dataset"] = {
+        "kind": "synthetic",
+        "rows": [{"instruction": "old row", "input": "", "output": "arr"}],
+    }
+    app.session_state["plan_prompts"] = ["a", "b", "c", "d", "e"]
+
+
+def _patch_feedback(monkeypatch, *, plan_mode="real", note="shorter, tighter"):
+    """Fake revise_run_config + capture the config the re-run receives."""
+    import supertaco.loop as loop_mod
+    import supertaco.planner as planner_mod
+    from supertaco.planner import DatasetSpec, RunPlan, plan_to_config
+
+    seen = {}
+
+    def fake_revise(feedback, config, goal, llm):
+        seen["feedback"] = feedback
+        seen["prior_cfg"] = dict(config)
+        seen["goal"] = goal
+        revised = RunPlan(
+            model="Qwen/Qwen2.5-1.5B-Instruct",
+            learning_rate=3e-4,
+            batch_size=2,
+            lora_r=16,
+            lora_alpha=32,
+            num_epochs=2,
+            dataset=DatasetSpec(
+                kind="synthetic", rows=[{"instruction": "new row", "input": "", "output": "arr"}]
+            ),
+            eval_prompts=["a", "b", "c", "d", "e"],
+            plan_mode=plan_mode,
+            revision_note=note,
+        )
+        new_cfg = plan_to_config(revised)
+        new_cfg["goal"] = goal
+        new_cfg["eval_prompts"] = list(revised.eval_prompts)
+        if note:
+            new_cfg["revision_note"] = note
+        return new_cfg, revised
+
+    def fake_loop(config, **kwargs):
+        seen["run_config"] = dict(config)
+        seen["run_prompts"] = kwargs.get("prompts")
+        return LoopResult(
+            success=True,
+            attempts=1,
+            final_config=dict(config),
+            configs_written=[],
+            failure_key=None,
+            error=None,
+            llm_calls=[],
+            eval_results={
+                "prompts": ["a"],
+                "base_scores": [5.0],
+                "fine_tuned_scores": [8.0],
+                "modes": ["base:real / ft:real"],
+                "regression_flagged": False,
+            },
+        )
+
+    monkeypatch.setattr(planner_mod, "revise_run_config", fake_revise)
+    monkeypatch.setattr(loop_mod, "run_training_loop", fake_loop)
+    return seen
+
+
+def test_feedback_button_revises_and_reruns(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    old_result = app.session_state["run_result"]
+    assert old_result.success is True
+
+    _seed_plan_keys(app)
+    seen = _patch_feedback(monkeypatch)
+    app.run()  # feedback box appears now that a run finished
+
+    next(sb for sb in app.sidebar.selectbox if sb.label == "model").set_value("tinyllama-1.1b")
+    fb = next(ta for ta in app.text_area if ta.label == "Feedback on the result")
+    fb.set_value("be more concise")
+    next(b for b in app.button if "Re-run with feedback" in b.label).click().run()
+    assert not app.exception, [e.value for e in app.exception]
+
+    # revision input: feedback + goal + prior cfg carrying the sidebar model + old dataset
+    assert seen["feedback"] == "be more concise"
+    assert seen["goal"] == "pirate chef"
+    assert seen["prior_cfg"]["model"] == "tinyllama-1.1b"
+    assert seen["prior_cfg"]["dataset"]["rows"][0]["instruction"] == "old row"
+
+    # ordering: the re-run received the REVISED config, not the pre-revision snapshot
+    run_cfg = seen["run_config"]
+    assert run_cfg["model"] == "qwen2.5-1.5b"  # reverse-mapped; beats the stale model_sel
+    assert run_cfg["num_epochs"] == 2
+    assert run_cfg["batch_size"] == 2
+    assert run_cfg["learning_rate"] == pytest.approx(3e-4)
+    assert run_cfg["dataset"]["rows"][0]["instruction"] == "new row"
+    assert seen["run_prompts"] == ["a", "b", "c", "d", "e"]
+
+    assert app.session_state["plan_goal"] == "pirate chef"
+    assert app.session_state["config"]["model"] == "qwen2.5-1.5b"
+    assert app.session_state["knobs"]["num_epochs"] == 2
+    assert app.session_state["plan_dataset"]["rows"][0]["instruction"] == "new row"
+    assert any('Revised with feedback: "be more concise"' in s.value for s in app.success)
+    assert any("shorter, tighter" in s.value for s in app.success)
+    assert app.session_state["prev_run_result"] is old_result
+    assert app.session_state["run_result"] is not old_result
+
+
+def test_feedback_fallback_keeps_previous_plan_warning(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    old_result = app.session_state["run_result"]
+
+    _seed_plan_keys(app)
+    _patch_feedback(
+        monkeypatch,
+        plan_mode="fallback",
+        note="feedback revision failed - keeping the previous plan",
+    )
+    app.run()
+
+    fb = next(ta for ta in app.text_area if ta.label == "Feedback on the result")
+    fb.set_value("be more concise")
+    next(b for b in app.button if "Re-run with feedback" in b.label).click().run()
+    assert not app.exception, [e.value for e in app.exception]
+    warn = "\n".join(w.value for w in app.warning)
+    assert 'Revision for: "be more concise" - kept the previous plan' in warn
+    assert "(Nemotron reply unparseable)" in warn
+    assert not any("Revised with feedback" in s.value for s in app.success)
+    assert app.session_state["prev_run_result"] is old_result
+
+
+def test_feedback_validation_warnings(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+
+    import supertaco.loop as loop_mod
+
+    calls = []
+
+    def boom(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("loop must not run for invalid feedback")
+
+    monkeypatch.setattr(loop_mod, "run_training_loop", boom)
+    app.run()  # feedback box appears now that a run finished
+
+    next(b for b in app.button if "Re-run with feedback" in b.label).click().run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert any("Describe what to change first." in w.value for w in app.warning)
+    assert calls == []
+
+    fb = next(ta for ta in app.text_area if ta.label == "Feedback on the result")
+    fb.set_value("make it better")
+    next(b for b in app.button if "Re-run with feedback" in b.label).click().run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert any(
+        "Feedback needs a goal-planned run - plan a goal first." in w.value for w in app.warning
+    )
+    assert calls == []
+
+
+def test_report_shows_before_after_delta(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    # this run's ft avg is 9.00 (FakeLLM); pretend the pre-feedback run scored 3.00
+    app.session_state["prev_run_result"] = LoopResult(
+        success=True,
+        attempts=1,
+        final_config={},
+        configs_written=[],
+        failure_key=None,
+        error=None,
+        llm_calls=[],
+        eval_results={
+            "prompts": ["p1", "p2"],
+            "base_scores": [1.0, 1.0],
+            "fine_tuned_scores": [3.0, 3.0],
+            "modes": ["base:real / ft:real", "base:real / ft:real"],
+            "regression_flagged": False,
+        },
+    )
+    app.run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert any(
+        "Before feedback: fine-tuned avg 3.00 -> after: 9.00 (+6.00)" in c.value
+        for c in app.caption
+    )

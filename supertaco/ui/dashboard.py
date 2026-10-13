@@ -18,7 +18,7 @@ import yaml
 from supertaco.errors import ConfigurationError
 from supertaco.eval.harness import PROMPT_SUITE_SIZE
 from supertaco.loop import Event, extract_loss_points, make_llm, run_training_loop
-from supertaco.planner import materialize_dataset, plan_run, plan_to_config
+from supertaco.planner import materialize_dataset, plan_run, plan_to_config, revise_run_config
 
 st.set_page_config(page_title="SuperTaco", page_icon="🌮")
 
@@ -89,6 +89,7 @@ def init_session2():
         "eval_results": None,
         "events": [],
         "run_result": None,
+        "prev_run_result": None,
         "run_active": False,
         "gpu_result": None,
         "gpu_lines": [],
@@ -320,6 +321,14 @@ def render_report() -> None:
         col1.metric("Judge: base", f"{base_avg:.2f}")
         col2.metric("Judge: fine-tuned", f"{ft_avg:.2f}")
         col3.metric("Improvement", f"{ft_avg - base_avg:+.2f}")
+        prev = st.session_state.get("prev_run_result")
+        if prev and prev.eval_results and results["fine_tuned_scores"]:
+            prev_scores = prev.eval_results["fine_tuned_scores"]
+            prev_ft = sum(prev_scores) / len(prev_scores)
+            st.caption(
+                f"Before feedback: fine-tuned avg {prev_ft:.2f} -> after: {ft_avg:.2f} "
+                f"({ft_avg - prev_ft:+.2f})"
+            )
         if results["regression_flagged"]:
             st.error("🚨 EVAL REGRESSION: fine-tuned is >10% below baseline.")
         else:
@@ -567,6 +576,71 @@ def main():
         run_clicked = st.button(
             "🚀 Fine-tune on Colab (supervisor loop)", type="primary", use_container_width=True
         )
+
+        feedback_clicked = False
+        if st.session_state.get("run_result") is not None:
+            feedback = st.text_area(
+                "Feedback on the result",
+                key="feedback_text",
+                height=68,
+                placeholder='e.g. "be more concise", "pirate voice too subtle"',
+            )
+            feedback_clicked = st.button("🔁 Re-run with feedback", use_container_width=True)
+        if feedback_clicked:
+            goal = (st.session_state.get("plan_goal") or "").strip()
+            if not feedback.strip():
+                st.warning("Describe what to change first.")
+            elif not goal:
+                st.warning("Feedback needs a goal-planned run - plan a goal first.")
+            else:
+                with st.spinner("Nemotron is revising the plan from your feedback..."):
+                    llm = make_llm()
+                    prior_cfg = {**cfg, **knobs}
+                    if model_sel:
+                        prior_cfg["model"] = model_sel
+                    if st.session_state.get("plan_dataset"):
+                        prior_cfg["dataset"] = dict(st.session_state["plan_dataset"])
+                    prior_cfg["eval_prompts"] = st.session_state.get("plan_prompts") or []
+                    new_cfg, revised = revise_run_config(feedback.strip(), prior_cfg, goal, llm)
+                from supertaco.gpu.transport import MODEL_WHITELIST
+
+                st.session_state["config"] = {
+                    k: v
+                    for k, v in new_cfg.items()
+                    if k not in ("dataset", "goal", "eval_prompts", "revision_note")
+                }
+                st.session_state["config"]["model"] = next(
+                    (
+                        k
+                        for k, v in MODEL_WHITELIST.items()
+                        if v == st.session_state["config"]["model"]
+                    ),
+                    st.session_state["config"]["model"],
+                )
+                st.session_state["knobs"] = {
+                    k: getattr(revised, k)
+                    for k in ("learning_rate", "batch_size", "lora_r", "lora_alpha", "num_epochs")
+                }
+                st.session_state["plan_dataset"] = revised.dataset.model_dump(exclude_none=True)
+                st.session_state["plan_prompts"] = list(revised.eval_prompts)
+                st.session_state["prev_run_result"] = st.session_state["run_result"]
+                if revised.plan_mode == "fallback":
+                    st.warning(
+                        f'Revision for: "{feedback.strip()}" - kept the previous plan '
+                        "(Nemotron reply unparseable)."
+                    )
+                else:
+                    st.success(
+                        f'Revised with feedback: "{feedback.strip()}"'
+                        + (f" - {revised.revision_note}" if revised.revision_note else "")
+                    )
+                cfg_for_run = {
+                    **st.session_state["config"],
+                    **(st.session_state.get("knobs") or {}),
+                }
+                if st.session_state.get("plan_dataset"):
+                    cfg_for_run["dataset"] = dict(st.session_state["plan_dataset"])
+                run_clicked = True
 
     # ── Right Column: Monitor & Metrics ────────────────────────────
     with st.container(border=True):
