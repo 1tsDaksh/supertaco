@@ -245,10 +245,11 @@ def plan_from_config(config: dict) -> RunPlan:
         if "kind" in raw_ds and raw_ds["kind"] not in ("synthetic", "hf"):
             plan.dataset = DatasetSpec(kind="synthetic")  # G10: kind outside {synthetic, hf}
         else:
+            filtered = {k: v for k, v in raw_ds.items() if k in DatasetSpec.model_fields}
+            if "kind" not in filtered and filtered.get("rows"):
+                filtered["kind"] = "synthetic"  # same mapping as transport.render_script
             try:
-                spec = DatasetSpec(
-                    **{k: v for k, v in raw_ds.items() if k in DatasetSpec.model_fields}
-                )
+                spec = DatasetSpec(**filtered)
             except ValidationError:
                 spec = None  # malformed spec -> keep the RunPlan default (G8)
             if spec is not None:
@@ -259,7 +260,10 @@ def plan_from_config(config: dict) -> RunPlan:
                         spec.hf_id = hf_id
                     else:
                         spec = DatasetSpec(
-                            kind="hf", hf_id="yahma/alpaca-cleaned", max_rows=spec.max_rows
+                            kind="hf",
+                            hf_id="yahma/alpaca-cleaned",
+                            max_rows=spec.max_rows,
+                            note="blank hf dataset id; using the alpaca default",
                         )
                 plan.dataset = spec
     _validate_model(plan)

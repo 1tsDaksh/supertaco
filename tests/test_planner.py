@@ -354,6 +354,14 @@ def test_plan_from_config_clamps_hf_rows_and_fixes_blank_id():
     blank = plan_from_config({"dataset": {"kind": "hf", "hf_id": ""}})
     assert blank.dataset.hf_id == "yahma/alpaca-cleaned"
     assert blank.dataset.max_rows == 256  # mirrors the RunPlan default_factory
+    assert blank.dataset.note == "blank hf dataset id; using the alpaca default"  # G8 label
+
+
+def test_plan_from_config_missing_kind_with_rows_is_synthetic():
+    rows = [{"instruction": "a", "input": "", "output": "b"}]
+    rebuilt = plan_from_config({"dataset": {"rows": rows}})
+    assert rebuilt.dataset.kind == "synthetic"  # same mapping as transport.render_script
+    assert rebuilt.dataset.rows == rows
 
 
 class _RowLLM(_ReviseLLM):
