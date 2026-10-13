@@ -340,6 +340,22 @@ def test_plan_from_config_defaults_on_garbage():
     assert len(rebuilt.eval_prompts) == PROMPT_SUITE_SIZE
 
 
+def test_plan_from_config_unknown_dataset_kind_becomes_synthetic():
+    rebuilt = plan_from_config({"dataset": {"kind": "csv", "max_rows": 100000, "hf_id": ""}})
+    assert rebuilt.dataset.kind == "synthetic"  # G10: kind outside {synthetic, hf}
+
+
+def test_plan_from_config_clamps_hf_rows_and_fixes_blank_id():
+    capped = plan_from_config({"dataset": {"kind": "hf", "hf_id": "x/y", "max_rows": 100000}})
+    assert capped.dataset.max_rows == 512
+    floored = plan_from_config({"dataset": {"kind": "hf", "hf_id": "x/y", "max_rows": 3}})
+    assert floored.dataset.max_rows == 50
+
+    blank = plan_from_config({"dataset": {"kind": "hf", "hf_id": ""}})
+    assert blank.dataset.hf_id == "yahma/alpaca-cleaned"
+    assert blank.dataset.max_rows == 256  # mirrors the RunPlan default_factory
+
+
 class _RowLLM(_ReviseLLM):
     """ReviseLLM that also serves generate_dataset chunks (valid alpaca rows)."""
 
@@ -384,3 +400,15 @@ def test_revise_run_config_keeps_hf_dataset_untouched():
     new_cfg, revised = revise_run_config("more data please", cfg, "g", llm)
     assert new_cfg["dataset"]["hf_id"] == "x/y"  # kept, no generation
     assert not hasattr(llm, "last_goal")  # generate_rows never called
+
+
+def test_revise_run_config_refined_goal_passes_feedback_through_verbatim():
+    llm = _RowLLM('{"note": "n"}')
+    feedback = 'be {braces} and "quotes" like f"{x}"'
+    cfg = {
+        **plan_to_config(RunPlan(dataset=DatasetSpec(kind="synthetic"))),
+        "goal": "pirate chef",
+        "eval_prompts": ["a", "b", "c", "d", "e"],
+    }
+    revise_run_config(feedback, cfg, "pirate chef", llm)
+    assert llm.last_goal == f"pirate chef. Additional user feedback: {feedback}"

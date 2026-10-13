@@ -229,7 +229,8 @@ def plan_from_config(config: dict) -> RunPlan:
     """Rebuild a RunPlan from a config dict (plan yaml or dashboard session state).
 
     Values are validated per field so garbage entries are dropped instead of
-    raising (G8); anything rejected keeps its default.
+    raising (G8); anything rejected keeps its default. The dataset spec is
+    normalized to the same G10 rules the LLM path enforces (_dataset_spec).
     """
     fields = {}
     for key, value in config.items():
@@ -241,15 +242,26 @@ def plan_from_config(config: dict) -> RunPlan:
     plan = RunPlan(**fields)
     raw_ds = config.get("dataset")
     if isinstance(raw_ds, dict):
-        try:
-            plan.dataset = DatasetSpec(
-                **{k: v for k, v in raw_ds.items() if k in DatasetSpec.model_fields}
-            )
-        except ValidationError:
-            pass  # malformed dataset spec -> keep the default (G8)
-    prompts = config.get("eval_prompts")
-    if isinstance(prompts, list) and all(isinstance(p, str) and p.strip() for p in prompts):
-        plan.eval_prompts = list(prompts)
+        if "kind" in raw_ds and raw_ds["kind"] not in ("synthetic", "hf"):
+            plan.dataset = DatasetSpec(kind="synthetic")  # G10: kind outside {synthetic, hf}
+        else:
+            try:
+                spec = DatasetSpec(
+                    **{k: v for k, v in raw_ds.items() if k in DatasetSpec.model_fields}
+                )
+            except ValidationError:
+                spec = None  # malformed spec -> keep the RunPlan default (G8)
+            if spec is not None:
+                if spec.kind == "hf":
+                    spec.max_rows = min(max(spec.max_rows, 50), 512)
+                    hf_id = (spec.hf_id or "").strip()
+                    if hf_id:
+                        spec.hf_id = hf_id
+                    else:
+                        spec = DatasetSpec(
+                            kind="hf", hf_id="yahma/alpaca-cleaned", max_rows=spec.max_rows
+                        )
+                plan.dataset = spec
     _validate_model(plan)
     _clamp(plan)
     plan.batch_size = _cap_batch_for_model(plan.model, plan.batch_size)
