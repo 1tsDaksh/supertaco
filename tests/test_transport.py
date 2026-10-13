@@ -294,3 +294,39 @@ def test_non_list_rows_rejected(tmp_path):
     }
     with pytest.raises(ValueError, match="dataset rows must be"):
         render_script(cfg, ["x"], TEMPLATE, tmp_path)
+
+
+def test_render_script_output_is_pure_ascii(tmp_path):
+    """Non-ASCII in prompts/cfg/dataset must be folded before embedding.
+
+    The colab CLI reads the script with the Windows locale codec (cp1252);
+    multi-byte UTF-8 then mojibakes on the VM and breaks prompt-key matching.
+    """
+    cfg = {
+        "model": "Qwen/Qwen2.5-1.5B-Instruct",
+        "learning_rate": 0.0005,
+        "batch_size": 2,
+        "lora_r": 4,
+        "lora_alpha": 8,
+        "num_epochs": 2,
+        "note": "curly ’ quotes — folded",
+        "dataset": {
+            "kind": "synthetic",
+            "rows": [
+                {
+                    "instruction": "What’s “fine”?",
+                    "input": "",
+                    "output": "A—B is fine.",
+                }
+            ],
+        },
+    }
+    prompts = ["Draft a short clause for a non\u2011disclosure agreement."]
+    out = render_script(cfg, prompts, TEMPLATE, tmp_path)
+    text = out.read_bytes().decode("ascii")
+    assert "non-disclosure" in text
+    assert "curly ' quotes - folded" in text
+    data_block = text.split(DATA_START, 1)[1].split(DATA_END, 1)[0]
+    rendered = ast.literal_eval(data_block.split("DATA = ", 1)[1].strip())
+    assert rendered["rows"][0]["instruction"] == 'What\'s "fine"?'
+    assert rendered["rows"][0]["output"] == "A-B is fine."

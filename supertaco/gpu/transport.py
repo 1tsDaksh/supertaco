@@ -10,6 +10,7 @@ from typing import Callable, Optional
 
 from supertaco.errors import ConfigurationError
 from supertaco.loop import AttemptResult
+from supertaco.text import ascii_fold
 
 MODEL_WHITELIST: dict[str, str] = {
     "qwen2.5-0.5b": "Qwen/Qwen2.5-0.5B-Instruct",
@@ -52,8 +53,25 @@ def _swap(text: str, start: str, end: str, replacement: str) -> str:
     return pattern.sub(lambda _m: replacement, text, count=1)
 
 
+def _fold_embedded(value):
+    if isinstance(value, str):
+        return ascii_fold(value)
+    if isinstance(value, dict):
+        return {k: _fold_embedded(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_fold_embedded(v) for v in value]
+    return value
+
+
 def render_script(config: dict, prompts: list[str], template: Path, out_dir: Path) -> Path:
-    """Render a per-attempt script with config, prompts and dataset embedded."""
+    """Render a per-attempt script with config, prompts and dataset embedded.
+
+    All embedded text is ASCII-folded: the colab CLI reads the script with
+    the Windows locale codec (cp1252), so non-ASCII would mojibake on the
+    VM and break prompt-key matching in the judge.
+    """
+    config = _fold_embedded(config)
+    prompts = [str(_fold_embedded(p)) for p in prompts]
     text = template.read_text(encoding="utf-8")
     cfg_values = {k: v for k, v in config.items() if k not in ("dataset", "eval_prompts")}
     raw_dataset = config.get("dataset")

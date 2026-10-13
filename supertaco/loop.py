@@ -24,6 +24,7 @@ from supertaco.agent.playbook import (
 )
 from supertaco.errors import ConfigurationError
 from supertaco.paths import repo_root
+from supertaco.text import ascii_fold
 
 LOSS_RE = re.compile(r"\bloss\s+([0-9]+\.[0-9]+|NaN)\b", re.I)
 
@@ -191,7 +192,9 @@ def run_training_loop(
     except ConfigurationError as exc:
         return _failed(0, str(exc))
 
-    prompts = list(prompts) if prompts else list(DEFAULT_PROMPTS)
+    # fold to ASCII once here: render and judge must share the exact keys the
+    # VM will echo (the colab CLI reads scripts with the cp1252 locale codec)
+    prompts = [ascii_fold(p) for p in (list(prompts) if prompts else list(DEFAULT_PROMPTS))]
     current = dict(config)
     configs_written: list[str] = []
     ledger: list[AttemptRecord] = []

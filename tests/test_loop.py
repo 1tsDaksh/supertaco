@@ -650,3 +650,42 @@ def test_unrecognized_error_still_fails_fast():
     assert result.failure_key is None
     assert llm.call_log == []  # no classify/patch on a fail-fast
     assert [e.type for e in events][-1] == "run_failed"
+
+
+def test_cp1252_script_read_keeps_judge_prompts_in_sync(tmp_path):
+    """Regression: the colab CLI reads the rendered script with the Windows
+    locale codec (cp1252). A U+2011 hyphen from planner prompts used to
+    mojibake on the VM, so the judge KeyError'd on the clean prompt key."""
+    import ast
+    import re
+
+    from supertaco.gpu.transport import render_script
+
+    template = repo_root() / "colab" / "train_lora.py"
+
+    def cp1252_vm(prompts_arg):
+        config = {"model": "Qwen/Qwen2.5-0.5B-Instruct", "learning_rate": 2e-4}
+        script = render_script(config, list(prompts_arg), template, tmp_path / "renders")
+        raw = script.read_bytes().decode("cp1252")
+        match = re.search(r"EVAL_PROMPTS = (\[.*?\])\r?\n", raw, re.S)
+        vm_prompts = ast.literal_eval(match.group(1))
+        return make_result(HEALTHY_LOG, responses_for(vm_prompts))
+
+    prompts = [
+        "Explain the elements of negligence in a personal injury case.",
+        (
+            "Draft a short clause for a non\u2011disclosure agreement "
+            "that protects confidential information."
+        ),
+        "Summarize Miranda v. Arizona.",
+    ]
+    transport = FakeTransport([cp1252_vm])
+    llm = FakeLLM()
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=llm,
+        runs_dir=str(tmp_path / "runs"),
+        prompts=prompts,
+    )
+    assert result.success, result.error
