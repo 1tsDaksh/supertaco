@@ -38,7 +38,7 @@ def _request(**overrides):
 
 
 def test_build_job_spec_assembles_injections_and_env():
-    spec = build_job_spec(_request(), project_id="project-1")
+    spec = build_job_spec(_request())
     assert spec.image == "python:3.12-slim"
     assert spec.platform == "cpu-d3"
     assert spec.preset == "2vcpu-8gb"
@@ -59,9 +59,9 @@ def test_build_job_spec_rejects_non_ascii_injection():
     bad = _request(files=[{"container_path": "/supertaco/x.py", "content": "héllo".encode()}])
     # content must be pure ASCII bytes: encode with ascii to pass, latin-1 to fail
     ok = _request(files=[{"container_path": "/supertaco/x.py", "content": b"plain"}])
-    assert build_job_spec(ok, project_id="p").injected_files[0].content == b"plain"
+    assert build_job_spec(ok).injected_files[0].content == b"plain"
     with pytest.raises(ValueError, match="ASCII"):
-        build_job_spec(bad, project_id="p")
+        build_job_spec(bad)
 
 
 def test_state_name_normalizes_enum_and_string():
@@ -174,6 +174,90 @@ def test_run_emits_events():
     kinds = [e[0] for e in events]
     assert "job_created" in kinds
     assert "job_completed" in kinds
+
+
+def test_run_missing_auth_env_returns_error_outcome_not_raise(monkeypatch):
+    # settings.py loads the real .env into os.environ on import, so force the
+    # missing-auth path deterministically (and keep the test off the network).
+    for key in ("NEBIUS_SERVICE_ACCOUNT_ID", "NEBIUS_PUBLIC_KEY_ID", "NEBIUS_PRIVATE_KEY_FILE"):
+        monkeypatch.delenv(key, raising=False)
+    outcome = NebiusJobsClient(project_id="p", job_client=None, sleep=lambda s: None).run(
+        _request()
+    )
+    assert outcome.success is False
+    assert outcome.job_id is None
+    assert outcome.state == "ERROR"
+    assert "NEBIUS" in (outcome.error or "")
+
+
+def test_run_exception_after_create_still_deletes():
+    class GetBoom:
+        def __init__(self):
+            self.calls = 0
+
+        def create(self, req):
+            return _Op()
+
+        def get(self, req):
+            self.calls += 1
+            if self.calls >= 2:
+                raise RuntimeError("transient UNAVAILABLE")
+            return _Job("RUNNING")
+
+        def delete(self, req):
+            self.deleted = getattr(self, "deleted", []) + [req]
+
+    fake = GetBoom()
+    outcome = NebiusJobsClient(
+        project_id="p", job_client=fake, sleep=lambda s: None, poll_interval_s=0.0, timeout_s=5.0
+    ).run(_request())
+    assert outcome.success is False
+    assert outcome.job_id == "aijob-1"  # id retained
+    assert outcome.state == "ERROR"
+    assert "transient UNAVAILABLE" in (outcome.error or "")
+    assert len(fake.deleted) == 1  # deleted exactly once despite the get() failure
+
+
+def test_run_delete_failure_does_not_raise_and_emits_job_delete_failed():
+    class DeleteBoom:
+        def __init__(self):
+            self.deleted = 0
+
+        def create(self, req):
+            return _Op()
+
+        def get(self, req):
+            return _Job("COMPLETED")
+
+        def delete(self, req):
+            self.deleted += 1
+            raise RuntimeError("delete PERMISSION_DENIED")
+
+    events = []
+    fake = DeleteBoom()
+    outcome = NebiusJobsClient(
+        project_id="p",
+        job_client=fake,
+        sleep=lambda s: None,
+        poll_interval_s=0.0,
+        timeout_s=5.0,
+        on_event=lambda ev, **d: events.append((ev, d)),
+    ).run(_request())
+    assert outcome.success is True  # job itself completed; delete failure is a leak warning only
+    assert outcome.state == "COMPLETED"
+    assert fake.deleted == 1
+    assert any(ev == "job_delete_failed" for ev, _ in events)
+
+
+def test_run_raising_event_callback_does_not_break_run():
+    fake = FakeJobClient(["COMPLETED"])
+
+    def boom(ev, **d):
+        raise RuntimeError("cb boom")
+
+    outcome = _client(fake, on_event=boom).run(_request())
+    assert outcome.success is True
+    assert len(fake.deleted) == 1
 
 
 def test_terminal_states_constant():

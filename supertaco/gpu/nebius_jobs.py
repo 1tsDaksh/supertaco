@@ -1,7 +1,7 @@
 """Nebius Serverless Job lifecycle: build spec, create, poll, always delete.
 
 SDK imports happen inside functions (Windows cert shim lives in
-_build_sdk_client; see docs/WS11_NEBIUS_SPIKE.md). No eval knowledge here.
+_build_sdk_client; see local WS1.1 spike notes). No eval knowledge here.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ def _state_name(state: Any) -> str:
     return text.rsplit(".", 1)[-1]
 
 
-def build_job_spec(req: JobRequest, project_id: str) -> Any:
+def build_job_spec(req: JobRequest) -> Any:
     """Assemble an SDK JobSpec; injections must be pure ASCII (cp1252-safe)."""
     from nebius.api.nebius.ai.v1 import JobSpec
     from nebius.api.nebius.compute.v1 import DiskSpec as ComputeDiskSpec
@@ -94,11 +94,6 @@ def _build_sdk_client(project_id: str, user_agent_prefix: str) -> Any:
     import os
     import pathlib
 
-    import certifi
-    from grpc import ssl_channel_credentials  # type: ignore[import-untyped]  # grpc ships no stubs
-    from nebius.api.nebius.ai.v1 import JobServiceClient
-    from nebius.sdk import SDK
-
     missing = [
         key
         for key in (
@@ -110,6 +105,11 @@ def _build_sdk_client(project_id: str, user_agent_prefix: str) -> Any:
     ]
     if missing:
         raise ValueError(f"missing Nebius auth env: {', '.join(missing)}; set them in .env")
+    import certifi
+    from grpc import ssl_channel_credentials  # type: ignore[import-untyped]  # grpc ships no stubs
+    from nebius.api.nebius.ai.v1 import JobServiceClient
+    from nebius.sdk import SDK
+
     with open(certifi.where(), "rb") as fh:
         ca = fh.read()
     sdk = SDK(
@@ -154,17 +154,21 @@ class NebiusJobsClient:
 
     def _emit(self, event: str, **data: Any) -> None:
         if self._on_event is not None:
-            self._on_event(event, **data)
+            try:
+                self._on_event(event, **data)
+            except Exception:
+                pass
 
     def run(self, req: JobRequest) -> JobOutcome:
         """Run to a terminal state; the job resource is always deleted."""
-        from nebius.api.nebius.ai.v1 import CreateJobRequest, GetJobRequest
-        from nebius.api.nebius.common.v1 import ResourceMetadata
-
-        client = self._client()
+        client: Any = None
         job_id: Optional[str] = None
         try:
-            spec = build_job_spec(req, self.project_id)
+            from nebius.api.nebius.ai.v1 import CreateJobRequest, GetJobRequest
+            from nebius.api.nebius.common.v1 import ResourceMetadata
+
+            client = self._client()
+            spec = build_job_spec(req)
             op = client.create(
                 CreateJobRequest(
                     metadata=ResourceMetadata(parent_id=self.project_id, name=req.name),
@@ -210,7 +214,7 @@ class NebiusJobsClient:
                 state_details=details,
             )
         except Exception as exc:  # infra failure surfaces as a labeled outcome
-            if job_id:
+            if job_id and client is not None:
                 self._delete(client, job_id)
             return JobOutcome(False, job_id, "ERROR", error=f"{type(exc).__name__}: {exc}")
 
