@@ -54,9 +54,11 @@ def test_hash_score_matches_host():
 class _FakeTF:
     """OpenAI-compatible POST + presigned-PUT receiver on one port."""
 
-    def __init__(self, replies):
+    def __init__(self, replies, usage=None):
         self.replies = list(replies)
+        self.usage = {"total_tokens": 11} if usage is None else usage
         self.post_paths = []
+        self.auth_headers = []
         self.put_body = None
         outer = self
 
@@ -65,12 +67,13 @@ class _FakeTF:
                 length = int(self.headers.get("Content-Length", 0))
                 self.rfile.read(length)
                 outer.post_paths.append(self.path)
+                outer.auth_headers.append(self.headers.get("Authorization"))
                 idx = len(outer.post_paths) - 1
                 content = outer.replies[idx] if idx < len(outer.replies) else "5"
                 body = json.dumps(
                     {
                         "choices": [{"message": {"content": content}}],
-                        "usage": {"total_tokens": 11},
+                        "usage": outer.usage,
                     }
                 ).encode()
                 self.send_response(200)
@@ -107,7 +110,7 @@ def _responses_payload():
     }
 
 
-def _run_script(tmp_path, server, replies=None):
+def _run_script(tmp_path, server):
     responses_path = tmp_path / "responses.json"
     responses_path.write_text(json.dumps(_responses_payload()), encoding="utf-8")
     env = {
@@ -134,6 +137,9 @@ def test_script_scores_all_and_puts_harness_shape(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert len(server.post_paths) == 10
     assert all(p.endswith("/chat/completions") for p in server.post_paths)
+    assert set(server.auth_headers) == {"Bearer test-key"}
+    assert "scoring 1/10 base" in proc.stdout
+    assert "scoring 10/10 fine_tuned" in proc.stdout
     payload = json.loads(server.put_body)
     assert payload["base_scores"] == [8.0, 7.0, 6.0, 9.0, 5.0]
     assert payload["fine_tuned_scores"] == [9.0, 8.0, 7.0, 10.0, 6.0]
@@ -172,6 +178,43 @@ def test_script_unparseable_twice_falls_back_to_hash(tmp_path):
         payload["prompts"], payload["base_scores"], payload["fine_tuned_scores"], strict=True
     ):
         assert base == _hash_score(prompt, f"base answer {payload['prompts'].index(prompt)}")
+
+
+def test_script_malformed_usage_field_still_scores(tmp_path):
+    # non-dict "usage" in a 200 body must degrade to tokens=0, not traceback
+    server = _FakeTF(["8"] * 10, usage="not-a-dict")
+    try:
+        proc = _run_script(tmp_path, server)
+    finally:
+        server.close()
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(server.put_body)
+    assert payload["base_scores"] == [8.0] * 5
+    assert payload["fine_tuned_scores"] == [8.0] * 5
+    assert all(call["tokens"] == 0 for call in payload["call_log"])
+
+
+def test_script_non_dict_base_exits_cleanly(tmp_path):
+    responses = _responses_payload()
+    responses["base"] = ["not", "a", "dict"]
+    responses_path = tmp_path / "responses.json"
+    responses_path.write_text(json.dumps(responses), encoding="utf-8")
+    server = _FakeTF([])
+    try:
+        env = {
+            **os.environ,
+            "TOKEN_FACTORY_BASE_URL": f"http://127.0.0.1:{server.port}/v1",
+            "TOKEN_FACTORY_API_KEY": "k",
+            "SCORES_PUT_URL": f"http://127.0.0.1:{server.port}/scores",
+            "RESPONSES_PATH": str(responses_path),
+        }
+        proc = subprocess.run(
+            [sys.executable, str(_SCRIPT)], env=env, capture_output=True, text=True, timeout=60
+        )
+    finally:
+        server.close()
+    assert proc.returncode != 0
+    assert "bad responses payload" in proc.stderr
 
 
 def test_script_missing_responses_exits_nonzero(tmp_path):

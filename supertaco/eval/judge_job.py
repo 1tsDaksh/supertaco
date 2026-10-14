@@ -38,6 +38,7 @@ def parse_score(text):
 
 
 def hash_score(prompt, response):
+    """Deterministic 2.0-10.0 fallback score from the prompt+response SHA-256."""
     digest = int(hashlib.sha256(f"{prompt}{response}".encode()).hexdigest()[:8], 16)
     return round(2.0 + (digest % 81) / 10, 2)
 
@@ -66,11 +67,12 @@ def call_token_factory(base_url, api_key, prompt, timeout_s):
         latency = time.monotonic() - start
         return "", "fallback", f"{type(exc).__name__}: {exc}", 0, latency
     text = ""
+    tokens = 0
     try:
         text = payload["choices"][0]["message"].get("content") or ""
-    except (KeyError, IndexError, TypeError):
+        tokens = int((payload.get("usage") or {}).get("total_tokens") or 0)
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError):
         pass
-    tokens = int((payload.get("usage") or {}).get("total_tokens") or 0)
     latency = time.monotonic() - start
     return text, "real", None, tokens, latency
 
@@ -114,6 +116,7 @@ def score_one(base_url, api_key, prompt, response, timeout_s):
 
 
 def put_scores(put_url, payload, timeout_s):
+    """PUT the scores JSON payload to the presigned URL."""
     body = json.dumps(payload).encode()
     req = urllib.request.Request(
         put_url, data=body, headers={"Content-Type": "application/json"}, method="PUT"
@@ -123,6 +126,7 @@ def put_scores(put_url, payload, timeout_s):
 
 
 def main():
+    """Score responses.json against Token Factory and PUT the harness payload."""
     base_url = os.environ.get("TOKEN_FACTORY_BASE_URL", "")
     api_key = os.environ.get("TOKEN_FACTORY_API_KEY", "")
     put_url = os.environ.get("SCORES_PUT_URL", "")
@@ -140,16 +144,22 @@ def main():
         prompts = data["prompts"]
         base = data["base"]
         ft = data["fine_tuned"]
+        if not isinstance(prompts, list) or not isinstance(base, dict) or not isinstance(ft, dict):
+            raise ValueError("responses payload must have prompts list and base/fine_tuned dicts")
         if not all(isinstance(base.get(p), str) and isinstance(ft.get(p), str) for p in prompts):
             raise ValueError("responses payload missing string answers")
-    except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         print(f"bad responses payload: {exc}", file=sys.stderr)
         return 1
     results = {"base": [], "fine_tuned": []}
     modes, call_log = [], []
+    total_calls = len(prompts) * 2
+    done = 0
     for prompt in prompts:
         pair_modes = []
         for variant, answers in (("base", base), ("fine_tuned", ft)):
+            done += 1
+            print(f"scoring {done}/{total_calls} {variant}", flush=True)
             res = score_one(base_url, api_key, prompt, answers[prompt], timeout_s)
             results[variant].append(res["score"])
             pair_modes.append(res["mode"])
