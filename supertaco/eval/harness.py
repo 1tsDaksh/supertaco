@@ -17,25 +17,45 @@ DEFAULT_PROMPTS = [
 
 
 def run_eval_suite(
-    prompts, base_responses: dict, fine_tuned_responses: dict, llm: Any = None
+    prompts, base_responses: dict, fine_tuned_responses: dict, llm: Any = None, judge: Any = None
 ) -> dict:
-    """Run the fixed suite; every score comes from judges.score_response."""
+    """Run the fixed suite; judge=None scores per-prompt via judges.score_response.
+
+    A judge callable (prompts, base, ft) -> batch dict replaces the per-prompt
+    loop (WS1.2 Nebius job backend). Both paths compute the regression flag
+    identically and label results["judge_backend"].
+    """
     from supertaco.eval.judges import score_response
 
-    results: dict[str, Any] = {
-        "prompts": [],
-        "base_scores": [],
-        "fine_tuned_scores": [],
-        "modes": [],
-        "regression_flagged": False,
-    }
-    for prompt in prompts[:PROMPT_SUITE_SIZE]:
-        base = score_response(prompt, base_responses[prompt], llm=llm)
-        ft = score_response(prompt, fine_tuned_responses[prompt], llm=llm)
-        results["prompts"].append(prompt)
-        results["base_scores"].append(base.score)
-        results["fine_tuned_scores"].append(ft.score)
-        results["modes"].append(f"base:{base.mode} / ft:{ft.mode}")
+    suite = prompts[:PROMPT_SUITE_SIZE]
+    if judge is not None:
+        batch = judge(suite, base_responses, fine_tuned_responses)
+        results: dict[str, Any] = {
+            "prompts": list(batch["prompts"]),
+            "base_scores": list(batch["base_scores"]),
+            "fine_tuned_scores": list(batch["fine_tuned_scores"]),
+            "modes": list(batch["modes"]),
+            "regression_flagged": False,
+            "judge_backend": batch.get("judge_backend", "nebius_job"),
+            "call_log": list(batch.get("call_log", [])),
+        }
+    else:
+        results = {
+            "prompts": [],
+            "base_scores": [],
+            "fine_tuned_scores": [],
+            "modes": [],
+            "regression_flagged": False,
+            "judge_backend": "direct",
+            "call_log": [],
+        }
+        for prompt in suite:
+            base = score_response(prompt, base_responses[prompt], llm=llm)
+            ft = score_response(prompt, fine_tuned_responses[prompt], llm=llm)
+            results["prompts"].append(prompt)
+            results["base_scores"].append(base.score)
+            results["fine_tuned_scores"].append(ft.score)
+            results["modes"].append(f"base:{base.mode} / ft:{ft.mode}")
 
     if results["fine_tuned_scores"] and results["base_scores"]:
         avg_ft = sum(results["fine_tuned_scores"]) / len(results["fine_tuned_scores"])
