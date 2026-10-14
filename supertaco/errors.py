@@ -17,3 +17,9 @@ class ConfigurationError(Exception):
     """Raised when the training config is invalid."""
 
     pass
+
+
+class JudgeBackendError(Exception):
+    """Raised when the Nebius judge backend cannot complete an evaluation."""
+
+    pass
