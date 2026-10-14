@@ -1,7 +1,13 @@
 """Nebius judge backend: env validation, orchestration, labeled failures."""
 
+import json
+
+import pytest
+
 from supertaco.errors import JudgeBackendError
 from supertaco.eval.harness import DEFAULT_PROMPTS, run_eval_suite
+from supertaco.eval.nebius_backend import NebiusJudgeBackend
+from supertaco.gpu.nebius_jobs import JobOutcome
 
 
 def test_judge_backend_error_is_exception_with_message():
@@ -68,3 +74,166 @@ def test_run_eval_suite_judge_regression_flag():
 
     results = run_eval_suite(DEFAULT_PROMPTS, base, ft, judge=reg_judge)
     assert results["regression_flagged"] is True
+
+
+def _batch_scores():
+    prompts = [f"p{i}" for i in range(5)]
+    return {
+        "prompts": prompts,
+        "base_scores": [8.0] * 5,
+        "fine_tuned_scores": [9.0] * 5,
+        "modes": ["base:real / ft:real"] * 5,
+        "call_log": [
+            {
+                "prompt": p,
+                "variant": v,
+                "mode": "real",
+                "tokens": 11,
+                "latency": 0.2,
+                "error": None,
+                "response_preview": "9",
+            }
+            for p in prompts
+            for v in ("base", "fine_tuned")
+        ],
+    }
+
+
+class FakeJobs:
+    def __init__(self, outcome=None):
+        self.requests = []
+        self.outcome = outcome or JobOutcome(True, "aijob-9", "COMPLETED")
+
+    def run(self, req):
+        self.requests.append(req)
+        return self.outcome
+
+
+class FakeArtifacts:
+    def __init__(self, payload=None):
+        self.payload = payload if payload is not None else _batch_scores()
+        self.put_keys = []
+        self.deleted = []
+
+    def ensure_bucket(self):
+        return "supertaco-judge-artifacts"
+
+    def presign_put(self, key):
+        self.put_keys.append(key)
+        return f"https://s3.example/{key}"
+
+    def download_json(self, key):
+        return self.payload
+
+    def delete_object(self, key):
+        self.deleted.append(key)
+
+
+class FakeSecrets:
+    def __init__(self):
+        self.calls = []
+
+    def ensure_tf_secret(self, project_id, name, tf_key):
+        self.calls.append((project_id, name))
+        return ("secret-1", "ver-1")
+
+
+def _backend(**kwargs):
+    kwargs.setdefault("project_id", "project-1")
+    kwargs.setdefault("tf_base_url", "https://tf.example/v1")
+    kwargs.setdefault("tf_api_key", "tf-key")
+    kwargs.setdefault("jobs", FakeJobs())
+    kwargs.setdefault("artifacts", FakeArtifacts())
+    kwargs.setdefault("secrets", FakeSecrets())
+    return NebiusJudgeBackend(**kwargs)
+
+
+def test_backend_judge_returns_harness_shape_and_job_backend_label():
+    backend = _backend()
+    prompts = [f"p{i}" for i in range(5)]
+    base = {p: f"b{i}" for i, p in enumerate(prompts)}
+    ft = {p: f"f{i}" for i, p in enumerate(prompts)}
+    result = backend.judge(prompts, base, ft)
+    assert result["judge_backend"] == "nebius_job"
+    assert result["base_scores"] == [8.0] * 5
+    assert result["fine_tuned_scores"] == [9.0] * 5
+    assert result["prompts"] == prompts
+    assert len(result["call_log"]) == 10
+    assert result["call_log"][0]["judge_backend"] == "nebius_job"
+    assert result["call_log"][0]["job_id"] == "aijob-9"
+    assert result["call_log"][0]["model_key"] == "judge"
+
+
+def test_backend_injects_script_responses_and_secret_env():
+    jobs = FakeJobs()
+    artifacts = FakeArtifacts()
+    backend = _backend(jobs=jobs, artifacts=artifacts)
+    prompts = [f"p{i}" for i in range(5)]
+    base = {p: "b" for p in prompts}
+    ft = {p: "f" for p in prompts}
+    backend.judge(prompts, base, ft)
+    req = jobs.requests[0]
+    assert req.image == "python:3.12-slim"
+    assert req.platform == "cpu-d3"
+    assert req.preset == "2vcpu-8gb"
+    assert req.command == "python"
+    assert req.args == "/supertaco/judge_job.py"
+    paths = [f["container_path"] for f in req.files]
+    assert paths == ["/supertaco/judge_job.py", "/supertaco/responses.json"]
+    injected = json.loads(
+        next(f["content"] for f in req.files if f["container_path"].endswith("responses.json"))
+    )
+    assert injected["prompts"] == prompts
+    assert injected["base"] == base
+    assert injected["fine_tuned"] == ft
+    env = {e["name"]: e for e in req.env}
+    assert env["TOKEN_FACTORY_BASE_URL"]["value"] == "https://tf.example/v1"
+    assert env["TOKEN_FACTORY_API_KEY"]["mysterybox"] == {
+        "secret_id": "secret-1",
+        "version_id": "ver-1",
+    }
+    assert env["SCORES_PUT_URL"]["value"].startswith("https://s3.example/")
+    assert env["RESPONSES_PATH"]["value"] == "/supertaco/responses.json"
+
+
+def test_backend_job_failure_raises_and_cleans_object():
+    artifacts = FakeArtifacts()
+    backend = _backend(
+        jobs=FakeJobs(JobOutcome(False, "aijob-9", "FAILED", error="disk full")),
+        artifacts=artifacts,
+    )
+    with pytest.raises(JudgeBackendError, match="disk full"):
+        backend.judge(["p"], {"p": "b"}, {"p": "f"})
+    assert artifacts.deleted
+
+
+def test_backend_malformed_scores_raise():
+    backend = _backend(artifacts=FakeArtifacts(payload={"nope": 1}))
+    with pytest.raises(JudgeBackendError, match="scores"):
+        backend.judge(["p"], {"p": "b"}, {"p": "f"})
+
+
+def test_backend_missing_env_raises_at_construction(monkeypatch):
+    from supertaco.settings import settings
+
+    monkeypatch.setattr(settings, "nebius_project_id", "")
+    monkeypatch.delenv("NEBIUS_PROJECT_ID", raising=False)
+    with pytest.raises(JudgeBackendError, match="NEBIUS_PROJECT_ID"):
+        NebiusJudgeBackend(
+            tf_base_url="https://tf.example/v1",
+            tf_api_key="k",
+            jobs=FakeJobs(),
+            artifacts=FakeArtifacts(),
+            secrets=FakeSecrets(),
+        )
+
+
+def test_backend_deletes_job_artifact_after_success():
+    artifacts = FakeArtifacts()
+    backend = _backend(artifacts=artifacts)
+    backend.judge(
+        ["p0", "p1", "p2", "p3", "p4"],
+        {f"p{i}": "b" for i in range(5)},
+        {f"p{i}": "f" for i in range(5)},
+    )
+    assert len(artifacts.deleted) == 1
