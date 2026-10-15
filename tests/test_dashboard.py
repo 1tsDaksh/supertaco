@@ -823,6 +823,7 @@ def test_nebius_judge_badge_renders_for_job_backend(app, monkeypatch):
     _launch(app)
     assert not app.exception, [e.value for e in app.exception]
     assert any("Judged on Nebius AI Cloud" in str(b.value) for b in app.success)
+    assert not any("Nebius judge unavailable" in str(w.value) for w in app.warning)
 
 
 def test_direct_fallback_warns_about_nebius(app, monkeypatch):
@@ -839,17 +840,24 @@ def test_direct_fallback_warns_about_nebius(app, monkeypatch):
     _launch(app)
     assert not app.exception, [e.value for e in app.exception]
     assert any("Nebius judge unavailable" in str(w.value) for w in app.warning)
+    assert not any("Judged on Nebius AI Cloud" in str(b.value) for b in app.success)
 
 
 def test_direct_backend_shows_no_nebius_badge(app, monkeypatch):
     _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
     import supertaco.eval.nebius_backend as nb
 
+    calls = []
+
     def _forbidden(**kw):
+        calls.append(kw)
         raise AssertionError("direct-path test must never construct a Nebius backend")
 
     monkeypatch.setattr(nb, "NebiusJudgeBackend", _forbidden)
     assert app.checkbox(key="judge_on_nebius").value is False
     _launch(app)
     assert not app.exception, [e.value for e in app.exception]
+    assert calls == []
+    assert not any("Run crashed" in str(e.value) for e in app.error)
+    assert not any("Nebius judge unavailable" in str(w.value) for w in app.warning)
     assert not any("Judged on Nebius AI Cloud" in str(b.value) for b in app.success)
