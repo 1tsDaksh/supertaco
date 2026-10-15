@@ -22,12 +22,17 @@ BUCKET_NAME = "supertaco-judge-artifacts"
 PRESIGN_TTL_SECONDS = 3600
 
 
+def _logs_dir() -> Path:
+    """Audit-log directory, anchored to the repo root (cwd-independent). Test seam."""
+    return repo_root() / "logs"
+
+
 def _append_audit(entries: list[dict]) -> None:
     """Append judge-job call entries to logs/llm_calls.jsonl (warning only)."""
     import warnings
 
     try:
-        log_dir = repo_root() / "logs"
+        log_dir = _logs_dir()
         log_dir.mkdir(exist_ok=True)
         with open(log_dir / "llm_calls.jsonl", "a", encoding="utf-8") as fh:
             for entry in entries:

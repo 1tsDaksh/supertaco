@@ -265,3 +265,11 @@ def test_backend_malformed_call_log_entries_do_not_crash():
         {f"p{i}": "f" for i in range(5)},
     )
     assert result["judge_backend"] == "nebius_job"
+
+
+def test_logs_dir_defaults_to_repo_root(monkeypatch):
+    monkeypatch.undo()  # drop the conftest seam patch to see the real default
+    from supertaco.eval import nebius_backend as nb_module
+    from supertaco.paths import repo_root
+
+    assert nb_module._logs_dir() == repo_root() / "logs"
