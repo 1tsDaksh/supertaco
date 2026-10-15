@@ -208,9 +208,11 @@ def test_backend_job_failure_raises_and_cleans_object():
 
 
 def test_backend_malformed_scores_raise():
-    backend = _backend(artifacts=FakeArtifacts(payload={"nope": 1}))
+    artifacts = FakeArtifacts(payload={"nope": 1})
+    backend = _backend(artifacts=artifacts)
     with pytest.raises(JudgeBackendError, match="scores"):
         backend.judge(["p"], {"p": "b"}, {"p": "f"})
+    assert artifacts.deleted
 
 
 def test_backend_missing_env_raises_at_construction(monkeypatch):
@@ -237,3 +239,29 @@ def test_backend_deletes_job_artifact_after_success():
         {f"p{i}": "f" for i in range(5)},
     )
     assert len(artifacts.deleted) == 1
+
+
+def test_backend_download_error_still_raises_judge_backend_error():
+    class BoomArtifacts(FakeArtifacts):
+        def download_json(self, key):
+            raise RuntimeError("connection reset by peer")
+
+    backend = _backend(artifacts=BoomArtifacts())
+    with pytest.raises(JudgeBackendError, match="connection reset"):
+        backend.judge(
+            ["p0", "p1", "p2", "p3", "p4"],
+            {f"p{i}": "b" for i in range(5)},
+            {f"p{i}": "f" for i in range(5)},
+        )
+
+
+def test_backend_malformed_call_log_entries_do_not_crash():
+    payload = _batch_scores()
+    payload["call_log"] = ["not-a-dict", {"prompt": "p0", "response_preview": 123}]
+    backend = _backend(artifacts=FakeArtifacts(payload=payload))
+    result = backend.judge(
+        [f"p{i}" for i in range(5)],
+        {f"p{i}": "b" for i in range(5)},
+        {f"p{i}": "f" for i in range(5)},
+    )
+    assert result["judge_backend"] == "nebius_job"

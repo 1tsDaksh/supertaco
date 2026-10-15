@@ -88,12 +88,10 @@ class _S3Artifacts:
 
     def download_json(self, key: str) -> dict:
         client = self._ensure_client()
-        from botocore.exceptions import ClientError  # type: ignore[import-untyped]  # no stubs
-
         try:
             obj = client.get_object(Bucket=self._bucket_name, Key=key)
             return json.loads(obj["Body"].read().decode())
-        except (ClientError, json.JSONDecodeError, KeyError) as exc:
+        except Exception as exc:  # ClientError/BotoCoreError/JSONDecodeError/UnicodeDecodeError
             raise JudgeBackendError(f"cannot read scores object {key}: {exc}") from exc
 
     def delete_object(self, key: str) -> None:
@@ -241,7 +239,18 @@ class NebiusJudgeBackend:
         self._on_event = on_event
 
     def judge(self, prompts: list[str], base_responses: dict, fine_tuned_responses: dict) -> dict:
-        """Score the suite in one Nebius job; return harness-shaped batch dict."""
+        """Score the suite in one Nebius job; raise JudgeBackendError on any failure."""
+        try:
+            return self._judge_inner(prompts, base_responses, fine_tuned_responses)
+        except JudgeBackendError:
+            raise
+        except Exception as exc:
+            raise JudgeBackendError(f"judge failed: {type(exc).__name__}: {exc}") from exc
+
+    def _judge_inner(
+        self, prompts: list[str], base_responses: dict, fine_tuned_responses: dict
+    ) -> dict:
+        """Run the job pipeline; return harness-shaped batch dict."""
         try:
             script = JUDGE_SCRIPT_PATH.read_bytes()
         except OSError as exc:
@@ -312,11 +321,12 @@ class NebiusJudgeBackend:
                 "latency": entry.get("latency", 0.0),
                 "error": entry.get("error"),
                 "timestamp": stamp,
-                "response_preview": (entry.get("response_preview") or "")[:200],
+                "response_preview": str(entry.get("response_preview") or "")[:200],
                 "judge_backend": "nebius_job",
                 "job_id": outcome.job_id,
             }
             for entry in batch.get("call_log", [])
+            if isinstance(entry, dict)
         ]
         _append_audit(call_log)
         return {
