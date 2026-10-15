@@ -300,3 +300,65 @@ def test_run_rejects_blank_feedback(tmp_path, feedback):
     path.write_text(yaml.safe_dump({"model": "qwen2.5-0.5b"}), encoding="utf-8")
     with pytest.raises(SystemExit, match="feedback is empty"):
         cli.run_config(str(path), llm=SimpleNamespace(), transport=object(), feedback=feedback)
+
+
+def test_run_config_passes_judge_backend_through(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    transport = FakeTransport()
+    monkeypatch.setattr(cli, "_make_transport", lambda: transport)
+    seen = {}
+
+    real_loop = cli.run_training_loop
+
+    def spy(config, **kwargs):
+        seen.update(kwargs)
+        return real_loop(config, **kwargs)
+
+    monkeypatch.setattr(cli, "run_training_loop", spy)
+    cli.run_config(str(_write_cfg(tmp_path)), llm=FakeLLM(), judge_backend="nebius_job")
+    assert seen["judge_backend"] == "nebius_job"
+
+
+def test_main_run_wires_judge_backend_flag(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_make_transport", lambda: FakeTransport())
+    seen = {}
+    real_loop = cli.run_training_loop
+
+    def spy(config, **kwargs):
+        seen.update(kwargs)
+        return real_loop(config, **kwargs)
+
+    monkeypatch.setattr(cli, "run_training_loop", spy)
+    cli.main(["run", str(_write_cfg(tmp_path)), "--judge-backend", "nebius_job"])
+    assert seen["judge_backend"] == "nebius_job"
+
+
+def test_run_config_defaults_judge_backend_direct(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_make_transport", lambda: FakeTransport())
+    seen = {}
+    real_loop = cli.run_training_loop
+
+    def spy(config, **kwargs):
+        seen.update(kwargs)
+        return real_loop(config, **kwargs)
+
+    monkeypatch.setattr(cli, "run_training_loop", spy)
+    cli.run_config(str(_write_cfg(tmp_path)), llm=FakeLLM())
+    assert seen["judge_backend"] == "direct"
+
+
+def test_main_run_defaults_judge_backend_to_nebius_job(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_make_transport", lambda: FakeTransport())
+    seen = {}
+    real_loop = cli.run_training_loop
+
+    def spy(config, **kwargs):
+        seen.update(kwargs)
+        return real_loop(config, **kwargs)
+
+    monkeypatch.setattr(cli, "run_training_loop", spy)
+    cli.main(["run", str(_write_cfg(tmp_path))])
+    assert seen["judge_backend"] == "nebius_job"

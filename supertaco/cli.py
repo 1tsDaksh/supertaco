@@ -31,6 +31,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     run_parser.add_argument("config", help="Path to YAML config file")
     run_parser.add_argument("--feedback", help="Revise the plan from free-text feedback, then run")
+    run_parser.add_argument(
+        "--judge-backend",
+        choices=["direct", "nebius_job"],
+        default="nebius_job",
+        help="Where the eval judge runs (default: Nebius serverless job)",
+    )
 
     plan_parser = subparsers.add_parser(
         "plan", help="Turn a free-text goal into a reviewable run plan YAML"
@@ -39,7 +45,7 @@ def main(argv: list[str] | None = None) -> None:
 
     args = parser.parse_args(argv)
     if args.command == "run":
-        run_config(args.config, feedback=args.feedback)
+        run_config(args.config, feedback=args.feedback, judge_backend=args.judge_backend)
     elif args.command == "plan":
         plan_goal_command(args.goal)
     else:
@@ -83,13 +89,20 @@ def _make_transport():
     return ColabTransport()
 
 
-def run_config(config_path: str, llm=None, transport=None, feedback: str | None = None) -> None:
+def run_config(
+    config_path: str,
+    llm=None,
+    transport=None,
+    feedback: str | None = None,
+    judge_backend: str = "direct",
+) -> None:
     """Run the real supervisor loop for a config file.
 
     llm/transport default to the Token Factory client and the Colab
     transport; tests inject fakes through these parameters or by
     monkeypatching _make_transport. With feedback, the plan is revised
-    (Nemotron), written as *_revised.yaml, then trained.
+    (Nemotron), written as *_revised.yaml, then trained. judge_backend
+    selects where the eval judge runs ("direct" or "nebius_job").
     """
     if feedback is not None:
         feedback = feedback.strip()
@@ -130,7 +143,12 @@ def run_config(config_path: str, llm=None, transport=None, feedback: str | None 
 
     try:
         result = run_training_loop(
-            config, transport=transport, llm=llm, on_event=printer, prompts=eval_prompts
+            config,
+            transport=transport,
+            llm=llm,
+            on_event=printer,
+            prompts=eval_prompts,
+            judge_backend=judge_backend,
         )
     except ConfigurationError as exc:
         raise SystemExit(str(exc)) from exc
