@@ -5,7 +5,7 @@ import tempfile
 
 import pytest
 
-from supertaco.errors import ConfigurationError
+from supertaco.errors import ConfigurationError, JudgeBackendError
 from supertaco.eval.harness import DEFAULT_PROMPTS, RESPONSES_END, RESPONSES_START
 from supertaco.loop import (
     AttemptResult,
@@ -689,3 +689,117 @@ def test_cp1252_script_read_keeps_judge_prompts_in_sync(tmp_path):
         prompts=prompts,
     )
     assert result.success, result.error
+
+
+# ---------- Task 7: loop judge_backend seam + labeled direct fallback ----------
+
+
+def _healthy_transport():
+    return FakeTransport([make_result(HEALTHY_LOG, responses_for(DEFAULT_PROMPTS))])
+
+
+def test_loop_judge_backend_direct_is_default(monkeypatch):
+    # existing tests already cover this; explicit pin for the WS1.2 seam
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"model": "qwen2.5-0.5b", "learning_rate": 2e-4},
+        transport=_healthy_transport(),
+        llm=FakeLLM(),
+        on_event=on_event,
+        runs_dir=_tmp_runs(),
+    )
+    assert result.success
+    assert result.eval_results["judge_backend"] == "direct"
+
+
+def test_loop_nebius_backend_success_labels_job(monkeypatch):
+    from supertaco.eval import nebius_backend as nb
+
+    def fake_judge_backend_factory():
+        class B:
+            def judge(self, prompts, base, ft):
+                return {
+                    "prompts": list(prompts),
+                    "base_scores": [5.0] * 5,
+                    "fine_tuned_scores": [9.0] * 5,
+                    "modes": ["base:real / ft:real"] * 5,
+                    "call_log": [
+                        {
+                            "model_key": "judge",
+                            "model_id": "nvidia/nemotron-3-super-120b-a12b",
+                            "mode": "real",
+                            "tokens": 1,
+                            "latency": 0.1,
+                            "error": None,
+                            "timestamp": 0.0,
+                            "response_preview": "9",
+                            "judge_backend": "nebius_job",
+                        }
+                    ],
+                    "judge_backend": "nebius_job",
+                }
+
+        return B()
+
+    monkeypatch.setattr(nb, "NebiusJudgeBackend", lambda **kw: fake_judge_backend_factory())
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"model": "qwen2.5-0.5b", "learning_rate": 2e-4},
+        transport=_healthy_transport(),
+        llm=FakeLLM(),
+        on_event=on_event,
+        runs_dir=_tmp_runs(),
+        judge_backend="nebius_job",
+    )
+    assert result.success
+    assert result.eval_results["judge_backend"] == "nebius_job"
+    # job call_log merged into the run's llm_calls
+    assert any(c.get("judge_backend") == "nebius_job" for c in result.llm_calls)
+    assert not any(ev.type == "judge_fallback" for ev in events)
+
+
+def test_loop_nebius_backend_error_falls_back_labeled(monkeypatch):
+    from supertaco.eval import nebius_backend as nb
+
+    def boom(**kw):
+        raise JudgeBackendError("job aijob-1 ended FAILED: disk full")
+
+    monkeypatch.setattr(nb, "NebiusJudgeBackend", boom)
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"model": "qwen2.5-0.5b", "learning_rate": 2e-4},
+        transport=_healthy_transport(),
+        llm=FakeLLM(),
+        on_event=on_event,
+        runs_dir=_tmp_runs(),
+        judge_backend="nebius_job",
+    )
+    assert result.success  # run still succeeds via direct judging
+    assert result.eval_results["judge_backend"] == "direct_fallback"
+    fallbacks = [ev for ev in events if ev.type == "judge_fallback"]
+    assert len(fallbacks) == 1
+    assert "disk full" in fallbacks[0].data["reason"]
+
+
+def test_loop_nebius_mid_judge_error_falls_back(monkeypatch):
+    from supertaco.eval import nebius_backend as nb
+
+    class HalfBroken:
+        def judge(self, prompts, base, ft):
+            raise JudgeBackendError("scores PUT failed: timeout")
+
+    monkeypatch.setattr(nb, "NebiusJudgeBackend", lambda **kw: HalfBroken())
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"model": "qwen2.5-0.5b", "learning_rate": 2e-4},
+        transport=_healthy_transport(),
+        llm=FakeLLM(),
+        on_event=on_event,
+        runs_dir=_tmp_runs(),
+        judge_backend="nebius_job",
+    )
+    assert result.success
+    assert result.eval_results["judge_backend"] == "direct_fallback"
+    assert any(
+        "PUT failed" in ev.data.get("reason", "") for ev in events if ev.type == "judge_fallback"
+    )

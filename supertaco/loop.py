@@ -22,7 +22,7 @@ from supertaco.agent.playbook import (
     apply_default_fix,
     detect_failure,
 )
-from supertaco.errors import ConfigurationError
+from supertaco.errors import ConfigurationError, JudgeBackendError
 from supertaco.paths import repo_root
 from supertaco.text import ascii_fold
 
@@ -143,6 +143,7 @@ def run_training_loop(
     max_retries: int = 3,
     runs_dir: str = "configs/runs",
     prompts: Optional[list[str]] = None,
+    judge_backend: str = "direct",
 ) -> LoopResult:
     """Run attempts until the judge passes or the relaunch budget is spent.
 
@@ -274,10 +275,24 @@ def run_training_loop(
                     ledger=ledger,
                     eval_results=last_eval,
                 )
+            judge = None
+            if judge_backend == "nebius_job":
+                from supertaco.eval.nebius_backend import NebiusJudgeBackend
+
+                try:
+                    judge = NebiusJudgeBackend(on_event=None).judge
+                except JudgeBackendError as exc:
+                    _emit(on_event, "judge_fallback", reason=str(exc), stage="setup")
             try:
+                eval_results = run_eval_suite(
+                    prompts, responses["base"], responses["fine_tuned"], llm=llm, judge=judge
+                )
+            except JudgeBackendError as exc:
+                _emit(on_event, "judge_fallback", reason=str(exc), stage="job")
                 eval_results = run_eval_suite(
                     prompts, responses["base"], responses["fine_tuned"], llm=llm
                 )
+                eval_results["judge_backend"] = "direct_fallback"
             except KeyError as exc:
                 ledger.append(AttemptRecord(attempt, None, None, points, dict(current)))
                 return _failed(
@@ -287,6 +302,10 @@ def run_training_loop(
                     ledger=ledger,
                     eval_results=last_eval,
                 )
+            if judge is None and judge_backend == "nebius_job":
+                eval_results["judge_backend"] = "direct_fallback"
+            for entry in eval_results.pop("call_log", []) or []:
+                llm.call_log.append(entry)
             last_eval = eval_results
             if not eval_results["regression_flagged"]:
                 ledger.append(AttemptRecord(attempt, None, None, points, dict(current)))
