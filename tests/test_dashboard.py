@@ -113,6 +113,7 @@ def _patch_run(monkeypatch, transport, llm):
 @pytest.fixture()
 def app(offline):
     at = AppTest.from_file(str(DASHBOARD), default_timeout=60)
+    at.session_state["judge_on_nebius"] = False
     at.run()
     assert not at.exception, f"initial render crashed: {[e.value for e in at.exception]}"
     return at
@@ -799,3 +800,56 @@ def test_delta_hidden_when_current_judge_not_real(app, monkeypatch):
     judge_df = next(df for df in app.dataframe if "judge" in df.value.columns)
     assert all("hash" in str(m) for m in judge_df.value["judge"])  # current run is hash-mode
     assert not any("Before feedback:" in c.value for c in app.caption)
+
+
+def test_nebius_judge_badge_renders_for_job_backend(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    import supertaco.eval.nebius_backend as nb
+
+    class FakeJobBackend:
+        def judge(self, prompts, base, ft):
+            return {
+                "prompts": list(prompts),
+                "base_scores": [5.0] * len(prompts),
+                "fine_tuned_scores": [9.0] * len(prompts),
+                "modes": ["base:real / ft:real"] * len(prompts),
+                "call_log": [],
+                "judge_backend": "nebius_job",
+            }
+
+    monkeypatch.setattr(nb, "NebiusJudgeBackend", lambda **kw: FakeJobBackend())
+    app.checkbox(key="judge_on_nebius").set_value(True).run()
+    assert not app.exception, [e.value for e in app.exception]
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    assert any("Judged on Nebius AI Cloud" in str(b.value) for b in app.success)
+
+
+def test_direct_fallback_warns_about_nebius(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    import supertaco.eval.nebius_backend as nb
+    from supertaco.errors import JudgeBackendError
+
+    def boom(**kw):
+        raise JudgeBackendError("job aijob-1 ended FAILED: disk full")
+
+    monkeypatch.setattr(nb, "NebiusJudgeBackend", boom)
+    app.checkbox(key="judge_on_nebius").set_value(True).run()
+    assert not app.exception, [e.value for e in app.exception]
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    assert any("Nebius judge unavailable" in str(w.value) for w in app.warning)
+
+
+def test_direct_backend_shows_no_nebius_badge(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    import supertaco.eval.nebius_backend as nb
+
+    def _forbidden(**kw):
+        raise AssertionError("direct-path test must never construct a Nebius backend")
+
+    monkeypatch.setattr(nb, "NebiusJudgeBackend", _forbidden)
+    assert app.checkbox(key="judge_on_nebius").value is False
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    assert not any("Judged on Nebius AI Cloud" in str(b.value) for b in app.success)

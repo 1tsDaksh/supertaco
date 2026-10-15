@@ -340,6 +340,11 @@ def render_report() -> None:
             st.error("🚨 EVAL REGRESSION: fine-tuned is >10% below baseline.")
         else:
             st.caption("✅ Regression check passed (fine-tuned ≥ 90% of base).")
+        backend = results.get("judge_backend", "direct")
+        if backend == "nebius_job":
+            st.success("✓ Judged on Nebius AI Cloud — eval ran as a serverless job")
+        elif backend == "direct_fallback":
+            st.warning("⚠ Nebius judge unavailable — fell back to direct Token Factory judging")
         modes = results["modes"]
         if any("fallback" in m for m in modes):
             st.warning(
@@ -473,7 +478,9 @@ def _llm_rows(calls: list) -> list:
     ]
 
 
-def execute_launch(config, max_retries, timeline_slot, logs_slot, chart_slot, prompts=None):
+def execute_launch(
+    config, max_retries, timeline_slot, logs_slot, chart_slot, prompts=None, judge_backend="direct"
+):
     """Run the real loop, streaming events + live loss into the placeholders."""
     from supertaco.gpu.transport import ColabTransport
 
@@ -508,6 +515,7 @@ def execute_launch(config, max_retries, timeline_slot, logs_slot, chart_slot, pr
             max_retries=max_retries,
             runs_dir="configs/runs",
             prompts=prompts,
+            judge_backend=judge_backend,
         )
     finally:
         st.session_state["run_active"] = False
@@ -580,6 +588,15 @@ def main():
             cfg_for_run["model"] = model_sel
         if st.session_state.get("plan_dataset"):
             cfg_for_run["dataset"] = dict(st.session_state["plan_dataset"])
+        st.checkbox(
+            "Judge on Nebius AI Cloud (serverless job)",
+            value=True,
+            key="judge_on_nebius",
+            help=(
+                "Runs the Nemotron eval as a Nebius Serverless Job; falls back "
+                "to direct Token Factory judging on infra failure."
+            ),
+        )
         run_clicked = st.button(
             "🚀 Fine-tune on Colab (supervisor loop)", type="primary", use_container_width=True
         )
@@ -671,6 +688,9 @@ def main():
                     logs_slot,
                     chart_slot,
                     prompts=st.session_state.get("plan_prompts") or None,
+                    judge_backend=(
+                        "nebius_job" if st.session_state.get("judge_on_nebius", True) else "direct"
+                    ),
                 )
                 st.session_state["events"] = events
                 st.session_state["run_result"] = result
