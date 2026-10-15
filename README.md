@@ -46,6 +46,44 @@ Failure handling:
   actionable `run_failed`; the VM is always stopped, no silent fallbacks or orphan sessions.
 - **Immutable configs**: every patch creates a new file - the original config is never edited.
 
+## NVIDIA & Nebius usage
+
+SuperTaco uses three Nebius/NVIDIA surfaces:
+
+| Surface | Role | Where |
+|---|---|---|
+| Google Colab T4 (free) | LoRA training GPU | `colab/train_lora.py` via `ColabTransport` |
+| Nebius Token Factory | Nemotron judge + classifier LLM calls | `supertaco/agent/llm.py`, `supertaco/eval/judges.py` |
+| Nebius Serverless Jobs | Eval-as-a-job (WS1.2) | `supertaco/gpu/nebius_jobs.py`, `supertaco/eval/nebius_backend.py` |
+
+```
+supertaco run / dashboard Launch
+      |
+      v
+ColabTransport (T4 training)  ->  base + fine-tuned answers
+      |
+      v
+NebiusJudgeBackend (default; --judge-backend direct to skip)
+      |-- MysteryBox secret "supertaco-tf-key"  -> TF key never in the job spec
+      |-- FileInjection: judge_job.py + responses.json  (stdlib-only container)
+      |-- Serverless Job: python:3.12-slim, cpu-d3/2vcpu-8gb
+      |       judge_job.py scores 10 answers via Token Factory (Nemotron Super)
+      |       -> PUT scores.json to a presigned S3 URL
+      v
+host merges scores + audit log (logs/llm_calls.jsonl) -> regression check
+      |
+      +-- any Nebius infra failure -> labeled fallback to direct Token Factory
+                                       judging (judge_backend: direct_fallback)
+```
+
+Env for the Nebius job path (all in `.env`, never committed):
+
+- `NEBIUS_SERVICE_ACCOUNT_ID`, `NEBIUS_PUBLIC_KEY_ID`, `NEBIUS_PRIVATE_KEY_FILE`, `NEBIUS_PROJECT_ID` — authorized-key auth for Jobs/MysteryBox
+- `NEBIUS_S3_ACCESS_KEY_ID`, `NEBIUS_S3_SECRET_KEY`, `NEBIUS_S3_ENDPOINT` — S3-compatible object storage for the scores handoff
+- `NEBIUS_API_KEY` — Token Factory judge/classifier calls (host + job, via MysteryBox)
+
+Dashboard: the launch panel has a **"Judge on Nebius AI Cloud (serverless job)"** toggle (default on); the eval report shows **✓ Judged on Nebius AI Cloud** when the job backend produced the scores.
+
 ## Quick start
 
 Prerequisites: Python 3.11+, a Google account (one-time Colab auth), a Nebius Token Factory
