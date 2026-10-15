@@ -779,6 +779,7 @@ def test_loop_nebius_backend_error_falls_back_labeled(monkeypatch):
     fallbacks = [ev for ev in events if ev.type == "judge_fallback"]
     assert len(fallbacks) == 1
     assert "disk full" in fallbacks[0].data["reason"]
+    assert fallbacks[0].data["stage"] == "setup"
 
 
 def test_loop_nebius_mid_judge_error_falls_back(monkeypatch):
@@ -803,3 +804,35 @@ def test_loop_nebius_mid_judge_error_falls_back(monkeypatch):
     assert any(
         "PUT failed" in ev.data.get("reason", "") for ev in events if ev.type == "judge_fallback"
     )
+    fallback = next(ev for ev in events if ev.type == "judge_fallback")
+    assert fallback.data["stage"] == "job"
+
+
+def test_loop_nebius_missing_prompt_key_fails_gracefully(monkeypatch):
+    from supertaco.eval import nebius_backend as nb
+
+    class MissingKeyJudgeBackend:
+        # real NebiusJudgeBackend never raises raw exceptions: a missing prompt
+        # key surfaces as JudgeBackendError (its never-raise contract), which
+        # triggers the loop's direct re-run — that re-run must still hit the
+        # loop's KeyError branch and fail gracefully, not crash.
+        def judge(self, prompts, base, ft):
+            raise JudgeBackendError(
+                "responses payload missing prompt key: "
+                "'Give one reason eval scores can regress after training.'"
+            )
+
+    monkeypatch.setattr(nb, "NebiusJudgeBackend", lambda **kw: MissingKeyJudgeBackend())
+    events, on_event = collect_events()
+    # transport returns a responses payload missing one prompt key
+    incomplete = responses_for(DEFAULT_PROMPTS[:-1])  # drop the last prompt's answers
+    result = run_training_loop(
+        {"model": "qwen2.5-0.5b", "learning_rate": 2e-4},
+        transport=FakeTransport([make_result(HEALTHY_LOG, incomplete)]),
+        llm=FakeLLM(),
+        on_event=on_event,
+        runs_dir=_tmp_runs(),
+        judge_backend="nebius_job",
+    )
+    assert result.success is False
+    assert "missing prompt key" in result.error

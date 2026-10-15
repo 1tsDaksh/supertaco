@@ -284,15 +284,16 @@ def run_training_loop(
                 except JudgeBackendError as exc:
                     _emit(on_event, "judge_fallback", reason=str(exc), stage="setup")
             try:
-                eval_results = run_eval_suite(
-                    prompts, responses["base"], responses["fine_tuned"], llm=llm, judge=judge
-                )
-            except JudgeBackendError as exc:
-                _emit(on_event, "judge_fallback", reason=str(exc), stage="job")
-                eval_results = run_eval_suite(
-                    prompts, responses["base"], responses["fine_tuned"], llm=llm
-                )
-                eval_results["judge_backend"] = "direct_fallback"
+                try:
+                    eval_results = run_eval_suite(
+                        prompts, responses["base"], responses["fine_tuned"], llm=llm, judge=judge
+                    )
+                except JudgeBackendError as exc:
+                    _emit(on_event, "judge_fallback", reason=str(exc), stage="job")
+                    eval_results = run_eval_suite(
+                        prompts, responses["base"], responses["fine_tuned"], llm=llm
+                    )
+                    eval_results["judge_backend"] = "direct_fallback"
             except KeyError as exc:
                 ledger.append(AttemptRecord(attempt, None, None, points, dict(current)))
                 return _failed(
