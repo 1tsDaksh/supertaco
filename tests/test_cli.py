@@ -302,19 +302,22 @@ def test_run_rejects_blank_feedback(tmp_path, feedback):
         cli.run_config(str(path), llm=SimpleNamespace(), transport=object(), feedback=feedback)
 
 
-def test_run_config_passes_judge_backend_through(tmp_path, monkeypatch, capsys):
-    monkeypatch.chdir(tmp_path)
-    transport = FakeTransport()
-    monkeypatch.setattr(cli, "_make_transport", lambda: transport)
+def _stub_loop(monkeypatch):
+    """Capture run_training_loop kwargs without executing the real loop (hermetic)."""
     seen = {}
 
-    real_loop = cli.run_training_loop
-
-    def spy(config, **kwargs):
+    def fake_loop(config, **kwargs):
         seen.update(kwargs)
-        return real_loop(config, **kwargs)
+        return SimpleNamespace(success=True, attempts=1, configs_written=["c1"])
 
-    monkeypatch.setattr(cli, "run_training_loop", spy)
+    monkeypatch.setattr(cli, "run_training_loop", fake_loop)
+    return seen
+
+
+def test_run_config_passes_judge_backend_through(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_make_transport", lambda: FakeTransport())
+    seen = _stub_loop(monkeypatch)
     cli.run_config(str(_write_cfg(tmp_path)), llm=FakeLLM(), judge_backend="nebius_job")
     assert seen["judge_backend"] == "nebius_job"
 
@@ -322,14 +325,8 @@ def test_run_config_passes_judge_backend_through(tmp_path, monkeypatch, capsys):
 def test_main_run_wires_judge_backend_flag(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "_make_transport", lambda: FakeTransport())
-    seen = {}
-    real_loop = cli.run_training_loop
-
-    def spy(config, **kwargs):
-        seen.update(kwargs)
-        return real_loop(config, **kwargs)
-
-    monkeypatch.setattr(cli, "run_training_loop", spy)
+    monkeypatch.setattr(cli, "make_llm", lambda: FakeLLM())
+    seen = _stub_loop(monkeypatch)
     cli.main(["run", str(_write_cfg(tmp_path)), "--judge-backend", "nebius_job"])
     assert seen["judge_backend"] == "nebius_job"
 
@@ -337,14 +334,7 @@ def test_main_run_wires_judge_backend_flag(tmp_path, monkeypatch, capsys):
 def test_run_config_defaults_judge_backend_direct(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "_make_transport", lambda: FakeTransport())
-    seen = {}
-    real_loop = cli.run_training_loop
-
-    def spy(config, **kwargs):
-        seen.update(kwargs)
-        return real_loop(config, **kwargs)
-
-    monkeypatch.setattr(cli, "run_training_loop", spy)
+    seen = _stub_loop(monkeypatch)
     cli.run_config(str(_write_cfg(tmp_path)), llm=FakeLLM())
     assert seen["judge_backend"] == "direct"
 
@@ -352,13 +342,7 @@ def test_run_config_defaults_judge_backend_direct(tmp_path, monkeypatch, capsys)
 def test_main_run_defaults_judge_backend_to_nebius_job(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "_make_transport", lambda: FakeTransport())
-    seen = {}
-    real_loop = cli.run_training_loop
-
-    def spy(config, **kwargs):
-        seen.update(kwargs)
-        return real_loop(config, **kwargs)
-
-    monkeypatch.setattr(cli, "run_training_loop", spy)
+    monkeypatch.setattr(cli, "make_llm", lambda: FakeLLM())
+    seen = _stub_loop(monkeypatch)
     cli.main(["run", str(_write_cfg(tmp_path))])
     assert seen["judge_backend"] == "nebius_job"
