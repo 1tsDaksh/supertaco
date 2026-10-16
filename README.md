@@ -5,8 +5,9 @@ AI-supervised fine-tuning sandbox for the Nebius x NVIDIA Global AI Hackathon.
 Give it a config - base model, hyperparameters, prompts - and SuperTaco runs the whole loop:
 LoRA training on a **free Google Colab T4**, live log streaming, automatic failure diagnosis
 (NaN loss, OOM, divergence, eval regression, ...), config patching, relaunch (up to 3 times),
-then a before/after comparison scored by an NVIDIA **Nemotron** judge on **Nebius Token
-Factory**. Every attempt, event, and score is surfaced in a Streamlit attempt-ledger
+then a before/after comparison scored by an NVIDIA **Nemotron** judge - running as a
+**Nebius Serverless Job** (with a labeled fallback to direct Token Factory judging).
+Every attempt, event, and score is surfaced in a Streamlit attempt-ledger
 dashboard.
 
 ## How it works
@@ -26,7 +27,8 @@ ColabTransport  -> renders colab/train_lora.py with config + eval prompts baked 
 on-VM eval phase: base + fine-tuned answers for a fixed 5-prompt suite
       |
       v
-Nemotron judge on Nebius Token Factory (0-10 per answer, interleaved base -> ft)
+Nemotron judge - Nebius Serverless Job (default) or direct Token Factory
+      |       (0-10 per answer, interleaved base -> ft; fallback always labeled)
       |
       +-- avg(ft) >= 0.9 * avg(base)  -> run_succeeded (attempt-ledger report)
       |
@@ -79,8 +81,12 @@ host merges scores + audit log (logs/llm_calls.jsonl) -> regression check
 Env for the Nebius job path (all in `.env`, never committed):
 
 - `NEBIUS_SERVICE_ACCOUNT_ID`, `NEBIUS_PUBLIC_KEY_ID`, `NEBIUS_PRIVATE_KEY_FILE`, `NEBIUS_PROJECT_ID` — authorized-key auth for Jobs/MysteryBox
-- `NEBIUS_S3_ACCESS_KEY_ID`, `NEBIUS_S3_SECRET_KEY`, `NEBIUS_S3_ENDPOINT` — S3-compatible object storage for the scores handoff
+- `NEBIUS_S3_ACCESS_KEY_ID`, `NEBIUS_S3_SECRET_KEY`, `NEBIUS_S3_ENDPOINT` — S3-compatible object storage for the scores handoff (endpoint form `https://storage.<region>.nebius.cloud`; note some regions (e.g. eu-west2) have a zero Standard-storage quota - force the bucket to the `ENHANCED_THROUGHPUT` storage class via the console or `BucketService` update)
 - `NEBIUS_API_KEY` — Token Factory judge/classifier calls (host + job, via MysteryBox)
+
+If any Nebius job-path env is missing, the run still works: the judge falls back to direct
+Token Factory scoring, labeled `direct_fallback` in the report. Use `--judge-backend direct`
+(CLI) or the dashboard toggle to skip the job path entirely.
 
 Dashboard: the launch panel has a **"Judge on Nebius AI Cloud (serverless job)"** toggle (default on); the eval report shows **✓ Judged on Nebius AI Cloud** when the job backend produced the scores.
 
@@ -94,7 +100,9 @@ git clone https://github.com/1tsDaksh/supertaco.git && cd supertaco
 pip install -e .
 pip install --group dev
 
-cp .env.example .env    # set NEBIUS_API_KEY (judge + classifier calls)
+cp .env.example .env    # set NEBIUS_API_KEY (judge + classifier calls); add the NEBIUS_*
+                        # job-path vars above to enable the Serverless-Job judge (optional -
+                        # without them the judge falls back to direct Token Factory scoring)
 
 # one-time Colab auth: run `colab usage` in the google-colab-cli venv
 # and open the Google URL - details in colab/README.md
@@ -167,13 +175,14 @@ and the planner emits exactly 5 judge prompts (the judge scores at most 5).
   `logs/llm_calls.jsonl` (model, mode=`real`/`fallback`, tokens, latency, error) for audit.
 - On API errors the client trips a circuit breaker and falls back to simulated/hash scores,
   clearly marked `fallback` - never silently mixed with real results.
-- Budget: **$50 Token Factory credits** - the only metered resource (Colab T4 training is
-  free). Live runs require explicit human approval.
+- Budget: **$50 Token Factory credits** plus (optional) Nebius Serverless Job CPU minutes -
+  these are the only metered resources (Colab T4 training is free). Live runs require
+  explicit human approval.
 
 ## Testing & validation
 
 ```bash
-python -m pytest tests/ -q                # 199 tests - transport and LLM faked, no network/credits
+python -m pytest tests/ -q                # 263 tests - transport and LLM faked, no network/credits
 python -m ruff check .                    # lint
 python -m ruff format --check supertaco tests
 python -m mypy supertaco/                 # clean
@@ -189,6 +198,13 @@ Goal-driven runs are live: type a plain-English goal, Nemotron plans the run, ge
 synthetic dataset, trains on a Colab T4, self-heals failures (e.g. OOM -> halved batch +
 gradient checkpointing, relaunched automatically), and judges the result. Verified end to end
 on 2026-10-12 (fine-tuned 5.6 vs base 2.4; OOM healed in 2 attempts, no human input).
+
+Judge-as-a-Nebius-Job is live too (2026-10-16): the eval runs as a `cpu-d3/2vcpu-8gb`
+Serverless Job (`python:3.12-slim`, stdlib-only judge script injected via FileInjection, TF
+key via MysteryBox secret, scores via presigned S3 PUT) - live smoke passed end to end
+(job `aijob-e04wgsj23r9e9vg3p1`, 10/10 real judge calls, ~4 min wall, full cleanup).
+Any infra failure falls back to direct judging, labeled `direct_fallback`.
+
 Next up: demo video + submission (deadline 2026-10-30).
 
 ## License
