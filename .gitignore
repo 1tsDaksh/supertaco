@@ -10,6 +10,18 @@ env/
 venv/
 .venv/
 
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.streamlit/
+
+# Shell-redirect junk (accidental `2>$` / device-name artifacts)
+/$
+/NUL
+/typescript
+TEST_DASHBOARD.md
+
 # Environment variables
 .env
 .env.local
@@ -25,7 +37,8 @@ logs/*.log
 
 # Runtime artifacts from dashboard runs (cwd-relative under supertaco/)
 supertaco/logs/
-supertaco/configs/runs/
+supertaco/configs/
+supertaco/nebius/
 
 # Colab adapter artifacts (pulled back lora_adapter.zip)
 colab/output/
@@ -33,9 +46,6 @@ colab/output/
 # Configs runs (generated, not committed except examples)
 configs/runs/*
 !configs/runs/*_example.yaml
-
-# Streamlit
-.streamlit/
 
 # Jupyter
 .ipynb_checkpoints/
