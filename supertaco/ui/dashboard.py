@@ -123,10 +123,6 @@ def render_sidebar() -> Dict[str, Any]:
     elif calls:
         st.sidebar.success(f"✅ Nemotron: {len(calls)} real call(s)")
 
-    st.sidebar.markdown("### API Keys (from .env)")
-    st.sidebar.caption(f"NEBIUS_PROJECT_ID: {_settings.nebius_project_id}")
-    st.sidebar.caption("NEBIUS_API_KEY: loaded from .env on import")
-
     st.sidebar.markdown("### Model Cost Routing")
     st.sidebar.caption(
         "Start at nano → escalate to super on low confidence → ultra only when playbook misses"

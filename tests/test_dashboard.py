@@ -180,6 +180,12 @@ def test_sidebar_omits_vestigial_tavily_caption(app):
     assert not any("TAVILY" in c.value for c in app.sidebar.caption)
 
 
+def test_sidebar_omits_api_key_block(app):
+    texts = [m.value for m in app.sidebar.markdown] + [c.value for c in app.sidebar.caption]
+    assert not any("API Keys" in t for t in texts)
+    assert not any("NEBIUS_PROJECT_ID" in t for t in texts)
+
+
 def test_hash_judge_alert_says_unparseable_not_llm_unavailable(app, monkeypatch):
     _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), UnparseableJudgeLLM())
     _launch(app)
