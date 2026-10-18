@@ -238,6 +238,21 @@ Eight data-driven failure modes, each with a deterministic config patch (a new f
   + `gradient_checkpointing: true` honored by the Colab template), and relaunched
   successfully with no human input (2026-10-11).
 
+### Self-researching playbook (Tavily)
+
+On every distinct failure the loop searches Tavily once (`tavily-python`) for the
+failure mode + framework and attaches the **top-2 citations** to the patch event,
+the attempt ledger, and the dashboard timeline:
+
+```
+❌ detected `OOM` → ↳ sources: [Fine-tuning with PEFT ↗](https://huggingface.co/docs/peft), [Optimizing PyTorch training ↗](https://...)
+```
+
+Citations are **advisory evidence, never a patch input** — the deterministic playbook
+fix stays authoritative. Search calls are audited like every other model call
+(`model_key: "tavily"`, `mode: real|fallback` in `logs/llm_calls.jsonl`); with no
+`TAVILY_API_KEY` the loop runs with zero Tavily noise.
+
 ---
 
 ## Nemotron / Token Factory usage & cost routing
