@@ -850,6 +850,7 @@ def test_playbook_miss_crash_searches_citations_and_stays_honest():
     assert "zorp quuxle" in cites.queries[0]
     cit_ev = next(e for e in events if e.type == "citations_found")
     assert cit_ev.data["failure_key"] is None
+    assert cit_ev.data["citations"][0]["title"] == "T1"
     assert result.attempt_ledger[0].citations[0]["title"] == "T1"
     assert [e.type for e in events][-1] == "run_failed"
 

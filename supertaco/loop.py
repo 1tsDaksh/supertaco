@@ -262,7 +262,7 @@ def run_training_loop(
                 if citations is not None:
                     query = _citation_query(None, crash_text)
                     found_miss = [c.model_dump() for c in citations.search_citations(query)]
-                    rec.citations = found_miss
+                    rec.citations = list(found_miss)
                     _emit(
                         on_event,
                         "citations_found",
