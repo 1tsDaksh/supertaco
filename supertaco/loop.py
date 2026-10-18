@@ -52,7 +52,7 @@ class AttemptResult:
 
 @dataclass
 class AttemptRecord:
-    """Ledger entry for one attempt: failure key, verdict, losses, config."""
+    """Ledger entry for one attempt: failure key, verdict, losses, config, sources."""
 
     attempt: int
     failure_key: Optional[str]
@@ -60,6 +60,7 @@ class AttemptRecord:
     loss_points: list[float]
     config_before: dict
     config_after: Optional[dict] = None
+    citations: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -87,6 +88,17 @@ class AttemptTransport(Protocol):
 def _emit(on_event: Optional[OnEvent], event_type: str, **data: Any) -> None:
     if on_event is not None:
         on_event(Event(type=event_type, data=data))
+
+
+def _citation_query(failure_key: str | None, text: str) -> str:
+    """Build the Tavily query for a failure (WIN_PLAN §5 query shape)."""
+    if failure_key is not None:
+        from supertaco.agent.playbook import PLAYBOOK
+
+        spec = PLAYBOOK.get(failure_key)
+        desc = spec["description"] if spec else ""
+        return f"{failure_key}: {desc} pytorch LoRA fine-tuning".strip()
+    return f"pytorch fine-tuning crash: {text[:300]}"
 
 
 def validate_config(config: dict) -> None:
@@ -144,18 +156,24 @@ def run_training_loop(
     runs_dir: str = "configs/runs",
     prompts: Optional[list[str]] = None,
     judge_backend: str = "direct",
+    citations: Any = None,
 ) -> LoopResult:
     """Run attempts until the judge passes or the relaunch budget is spent.
 
     max_retries counts RELAUNCHES: initial attempt + up to max_retries
     relaunches. Validation failures and transport errors return a failed
     LoopResult (never raise) with an actionable message (spec D9).
+    citations: optional CitationClient; None builds one from settings (or skips when no key).
     """
     from supertaco.eval.harness import DEFAULT_PROMPTS, run_eval_suite, split_responses
     from supertaco.gpu.transport import resolve_model
 
     _emit(on_event, "run_started", max_retries=max_retries, mode="colab_t4")
     llm = llm or make_llm()
+    if citations is None:
+        from supertaco.agent.citations import client_from_settings
+
+        citations = client_from_settings(getattr(llm, "call_log", None))
     runs_path = _resolve_runs_dir(runs_dir)
 
     def _failed(
@@ -199,6 +217,7 @@ def run_training_loop(
     current = dict(config)
     configs_written: list[str] = []
     ledger: list[AttemptRecord] = []
+    citation_cache: dict[str, list[dict]] = {}
     attempt = 0
     attempt_limit = max_retries + 1
     failure_key: Optional[str] = None
@@ -344,6 +363,22 @@ def run_training_loop(
             )
 
         ledger.append(AttemptRecord(attempt, failure_key, None, points, dict(current)))
+        found: list[dict] = []
+        if citations is not None and failure_key is not None:
+            if failure_key in citation_cache:
+                found = citation_cache[failure_key]
+            else:
+                query = _citation_query(failure_key, train_logs)
+                found = [c.model_dump() for c in citations.search_citations(query)]
+                citation_cache[failure_key] = found
+                _emit(
+                    on_event,
+                    "citations_found",
+                    failure_key=failure_key,
+                    query=query,
+                    citations=list(found),
+                )
+            ledger[-1].citations = list(found)
         verdict = llm.classify_failure(train_logs)
         last = llm.call_log[-1] if getattr(llm, "call_log", None) else {}
         _emit(
@@ -367,6 +402,7 @@ def run_training_loop(
             attempt=attempt,
             failure_key=failure_key,
             proposal=proposal,
+            citations=list(found),
         )
         new_config = apply_default_fix(failure_key, current)
         path = _write_config(new_config, failure_key, runs_path)

@@ -5,6 +5,7 @@ import tempfile
 
 import pytest
 
+from supertaco.agent.citations import Citation, CitationClient
 from supertaco.errors import ConfigurationError, JudgeBackendError
 from supertaco.eval.harness import DEFAULT_PROMPTS, RESPONSES_END, RESPONSES_START
 from supertaco.loop import (
@@ -129,6 +130,27 @@ class FakeLLM:
 def collect_events():
     events = []
     return events, lambda ev: events.append(ev)
+
+
+def _cite_raw():
+    return [
+        {"title": "T1", "url": "https://a.example", "content": "one"},
+        {"title": "T2", "url": "https://b.example", "content": "two"},
+    ]
+
+
+class FakeCitationClient:
+    """Records every query; returns two fixed citations."""
+
+    def __init__(self):
+        self.queries = []
+
+    def search_citations(self, query, *, max_results=2):
+        self.queries.append(query)
+        return [
+            Citation(title="T1", url="https://a.example"),
+            Citation(title="T2", url="https://b.example"),
+        ]
 
 
 # ---------- Task 2: helpers ----------
@@ -689,6 +711,87 @@ def test_cp1252_script_read_keeps_judge_prompts_in_sync(tmp_path):
         prompts=prompts,
     )
     assert result.success, result.error
+
+
+# ---------- Task 2: citations wired into the heal path ----------
+
+
+def test_citations_searched_attached_to_patch_event_and_ledger():
+    transport = FakeTransport(
+        [
+            make_result(NAN_LOG),
+            lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts)),
+        ]
+    )
+    llm = FakeLLM()
+    cites = CitationClient(
+        "tvly-test", search=lambda q, max_results=2: _cite_raw(), call_log=llm.call_log
+    )
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 0.1, "batch_size": 8, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=llm,
+        on_event=on_event,
+        runs_dir=str(_tmp_runs()),
+        citations=cites,
+    )
+    assert result.success is True
+    # query shape from WIN_PLAN §5: "<KEY>: <playbook description> pytorch LoRA fine-tuning"
+    cit_ev = next(e for e in events if e.type == "citations_found")
+    assert cit_ev.data["failure_key"] == "NAN_LOSS"
+    assert cit_ev.data["query"].startswith("NAN_LOSS:")
+    assert "pytorch LoRA fine-tuning" in cit_ev.data["query"]
+    patch_ev = next(e for e in events if e.type == "patch_proposed")
+    assert [c["title"] for c in patch_ev.data["citations"]] == ["T1", "T2"]
+    assert result.attempt_ledger[0].citations[0]["url"] == "https://a.example"
+    assert result.attempt_ledger[1].citations == []  # healthy attempt: no search
+    # audit entries flow into the LoopResult
+    assert any(c.get("model_key") == "tavily" for c in result.llm_calls)
+
+
+def test_citations_searched_once_per_failure_key_and_reused_on_retry():
+    transport = FakeTransport([make_result(NAN_LOG)])  # always NaN -> 3 attempts
+    cites = FakeCitationClient()
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 0.1, "batch_size": 8, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=on_event,
+        runs_dir=str(_tmp_runs()),
+        max_retries=2,
+        citations=cites,
+    )
+    assert result.success is False  # budget exhausted
+    assert len(cites.queries) == 1  # 3 failed attempts, ONE search
+    assert len([e for e in events if e.type == "citations_found"]) == 1
+    assert all(r.citations for r in result.attempt_ledger)  # cache reused for attempts 2-3
+    patches = [e for e in events if e.type == "patch_proposed"]
+    assert patches and all(e.data["citations"] for e in patches)
+
+
+def test_no_citations_client_means_no_search_behavior_change():
+    # conftest stubs client_from_settings -> None, so the default path skips entirely
+    transport = FakeTransport(
+        [
+            make_result(NAN_LOG),
+            lambda prompts: make_result(HEALTHY_LOG, responses_for(prompts)),
+        ]
+    )
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 0.1, "batch_size": 8, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=on_event,
+        runs_dir=str(_tmp_runs()),
+    )
+    assert result.success is True
+    assert "citations_found" not in [e.type for e in events]
+    assert result.attempt_ledger[0].citations == []
+    patch_ev = next(e for e in events if e.type == "patch_proposed")
+    assert patch_ev.data["citations"] == []
 
 
 # ---------- Task 7: loop judge_backend seam + labeled direct fallback ----------
