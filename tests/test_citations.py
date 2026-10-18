@@ -90,3 +90,43 @@ def test_client_from_settings_builds_client_with_key(monkeypatch):
     out = client_from_settings([])
     assert isinstance(out, CitationClient)
     assert out.call_log is not None
+
+
+def test_jsonl_write_failure_never_raises_and_flags_entry(monkeypatch, tmp_path):
+    import supertaco.agent.citations as cit
+
+    (tmp_path / "logs").write_text("", encoding="utf-8")  # logs is a FILE -> mkdir fails
+    monkeypatch.setattr(cit, "_logs_dir", lambda: tmp_path / "logs")
+    call_log = []
+    client = CitationClient("tvly-test", search=lambda q, max_results=2: RAW, call_log=call_log)
+    out = client.search_citations("q")
+    assert [c.title for c in out] == ["HF Trainer docs", "PyTorch OOM"]
+    assert call_log[-1]["jsonl_written"] is False
+
+
+def test_max_results_caps_chatty_search_at_two():
+    def chatty(query, max_results=2):
+        return [
+            {"title": f"doc {i}", "url": f"https://ex.example/{i}", "content": "c"}
+            for i in range(5)
+        ]
+
+    client = CitationClient("tvly-test", search=chatty)
+    out = client.search_citations("q")
+    assert len(out) == 2
+    assert [c.title for c in out] == ["doc 0", "doc 1"]
+
+
+def test_null_fields_do_not_render_none_strings():
+    def odd(query, max_results=2):
+        return [
+            {"title": None, "url": None, "content": None},
+            {"title": None, "url": "https://x", "content": None},
+        ]
+
+    client = CitationClient("tvly-test", search=odd)
+    out = client.search_citations("q")
+    assert len(out) == 1
+    assert out[0].title == "untitled"
+    assert out[0].url == "https://x"
+    assert out[0].content == ""

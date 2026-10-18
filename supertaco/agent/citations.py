@@ -62,9 +62,9 @@ class CitationClient:
                 raw = self._default_search(query, max_results)
             citations = [
                 Citation(
-                    title=str(item.get("title", "")).strip() or "untitled",
-                    url=str(item.get("url", "")).strip(),
-                    content=str(item.get("content", ""))[:300],
+                    title=(str(item.get("title") or "")).strip() or "untitled",
+                    url=(str(item.get("url") or "")).strip(),
+                    content=(str(item.get("content") or ""))[:300],
                 )
                 for item in (raw or [])
                 if isinstance(item, dict)
