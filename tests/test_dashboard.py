@@ -867,3 +867,91 @@ def test_direct_backend_shows_no_nebius_badge(app, monkeypatch):
     assert not any("Run crashed" in str(e.value) for e in app.error)
     assert not any("Nebius judge unavailable" in str(w.value) for w in app.warning)
     assert not any("Judged on Nebius AI Cloud" in str(b.value) for b in app.success)
+
+
+def test_citations_render_under_patch_line_and_in_ledger(app, monkeypatch):
+    import supertaco.agent.citations as cit
+
+    class _Cites:
+        def search_citations(self, query, *, max_results=2):
+            from supertaco.agent.citations import Citation
+
+            return [
+                Citation(title="HF Trainer docs", url="https://hf.example/trainer"),
+                Citation(title="PyTorch OOM", url="https://pytorch.example/oom"),
+            ]
+
+    monkeypatch.setattr(cit, "client_from_settings", lambda call_log=None: _Cites())
+    _patch_run(
+        monkeypatch,
+        FakeTransport([(NAN_LOG, None, None), (HEALTHY_LOG, "ok", None)]),
+        FakeLLM(),
+    )
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    result = app.session_state["run_result"]
+    assert result.success is True
+    md = "\n".join(m.value for m in app.markdown)
+    assert "↳ sources:" in md
+    assert "[HF Trainer docs](https://hf.example/trainer)" in md
+    ledger_df = next(d for d in app.dataframe if "sources" in d.value.columns)
+    assert ledger_df.value["sources"][0] == "HF Trainer docs, PyTorch OOM"
+    assert ledger_df.value["sources"][1] == "—"
+
+
+def test_run_failed_shows_sources_for_playbook_miss(app, monkeypatch):
+    import supertaco.agent.citations as cit
+
+    class _Cites:
+        def search_citations(self, query, *, max_results=2):
+            from supertaco.agent.citations import Citation
+
+            return [Citation(title="Crash docs", url="https://crash.example")]
+
+    monkeypatch.setattr(cit, "client_from_settings", lambda call_log=None: _Cites())
+    _patch_run(
+        monkeypatch,
+        FakeTransport([("zorp quuxle", None, "zorp quuxle: totally unrecognized")]),
+        FakeLLM(),
+    )
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    result = app.session_state["run_result"]
+    assert result.success is False
+    md = "\n".join(m.value for m in app.markdown)
+    assert "🛑 **Failed**" in md
+    assert "↳ sources:" in md
+    assert "[Crash docs](https://crash.example)" in md
+
+
+def test_run_failed_stays_silent_when_miss_search_is_empty(app, monkeypatch):
+    # Stale-source guard: attempt 1 OOM finds citations, attempt 2 honest miss
+    # returns [] -> the Failed line must NOT show OOM's sources (wrong failure).
+    import supertaco.agent.citations as cit
+
+    class _Cites:
+        def search_citations(self, query, *, max_results=2):
+            from supertaco.agent.citations import Citation
+
+            if query.startswith("pytorch fine-tuning crash:"):
+                return []
+            return [Citation(title="OOM docs", url="https://oom.example")]
+
+    monkeypatch.setattr(cit, "client_from_settings", lambda call_log=None: _Cites())
+    _patch_run(
+        monkeypatch,
+        FakeTransport(
+            [
+                ("RuntimeError: CUDA out of memory. Tried to allocate 2.00 GiB", None, None),
+                ("zorp quuxle", None, "zorp quuxle: totally unrecognized"),
+            ]
+        ),
+        FakeLLM(),
+    )
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    result = app.session_state["run_result"]
+    assert result.success is False
+    md = "\n".join(m.value for m in app.markdown)
+    assert "🛑 **Failed**" in md
+    assert "OOM docs" not in md.split("🛑 **Failed**")[-1]  # no stale sources

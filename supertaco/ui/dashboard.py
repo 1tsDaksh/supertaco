@@ -290,6 +290,7 @@ def render_report() -> None:
             "verdict": [],
             "config changes": [],
             "loss points": [],
+            "sources": [],
         }
         for rec in result.attempt_ledger:
             rows["attempt"].append(rec.attempt)
@@ -305,6 +306,9 @@ def render_report() -> None:
                 changed = "—"
             rows["config changes"].append(changed)
             rows["loss points"].append(len(rec.loss_points))
+            rows["sources"].append(
+                ", ".join(c.get("title", "") for c in rec.citations).strip(", ") or "—"
+            )
         st.dataframe(rows, use_container_width=True, hide_index=True)
 
     results = result.eval_results
@@ -407,7 +411,11 @@ def _render_events(events: list) -> str:
                 if isinstance(d["proposal"], dict)
                 else d["proposal"]
             )
-            lines.append(f"**Attempt {d['attempt']}** · 🧩 model reasoning: {reason}")
+            line = f"**Attempt {d['attempt']}** · 🧩 model reasoning: {reason}"
+            cites = d.get("citations") or []
+            if cites:
+                line += "\n   ↳ sources: " + ", ".join(f"[{c['title']}]({c['url']})" for c in cites)
+            lines.append(line)
         elif ev.type == "patch_written":
             before, after = d.get("before", {}), d.get("after", {})
             changed = ", ".join(
@@ -427,7 +435,22 @@ def _render_events(events: list) -> str:
         elif ev.type == "run_failed":
             detail = f" · attempts {d['attempts']}" if d.get("attempts") is not None else ""
             last = f" · last `{d['path']}`" if d.get("path") else ""
-            lines.append(f"🛑 **Failed**: {d['error']}{detail}{last}")
+            line = f"🛑 **Failed**: {d['error']}{detail}{last}"
+            cit_ev = next(
+                (
+                    e
+                    for e in reversed(events)
+                    if e.type == "citations_found"
+                    and e.data.get("failure_key") == d.get("failure_key")
+                    and e.data.get("citations")
+                ),
+                None,
+            )
+            if cit_ev is not None:
+                line += "\n   ↳ sources: " + ", ".join(
+                    f"[{c['title']}]({c['url']})" for c in cit_ev.data["citations"]
+                )
+            lines.append(line)
     return "\n\n".join(lines)
 
 
