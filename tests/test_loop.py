@@ -824,6 +824,36 @@ def test_citations_searched_again_when_failure_key_changes():
     assert result.attempt_ledger[1].citations
 
 
+def test_playbook_miss_crash_searches_citations_and_stays_honest():
+    transport = FakeTransport(
+        [AttemptResult(logs="zorp quuxle", error="zorp quuxle: totally unrecognized")]
+    )
+    llm = FakeLLM()
+    cites = FakeCitationClient()
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 2e-4, "batch_size": 8, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=llm,
+        on_event=on_event,
+        runs_dir=str(_tmp_runs()),
+        citations=cites,
+    )
+    # honest failure is unchanged: fail fast, no classify/patch, no retry
+    assert result.success is False
+    assert result.failure_key is None
+    assert len(transport.calls) == 1
+    assert llm.call_log == []
+    # but the human gets external context for the unknown crash
+    assert len(cites.queries) == 1
+    assert cites.queries[0].startswith("pytorch fine-tuning crash: ")
+    assert "zorp quuxle" in cites.queries[0]
+    cit_ev = next(e for e in events if e.type == "citations_found")
+    assert cit_ev.data["failure_key"] is None
+    assert result.attempt_ledger[0].citations[0]["title"] == "T1"
+    assert [e.type for e in events][-1] == "run_failed"
+
+
 # ---------- Task 7: loop judge_backend seam + labeled direct fallback ----------
 
 

@@ -257,9 +257,19 @@ def run_training_loop(
             crash_key = detect_failure(crash_text)
             if crash_key is None:
                 # D9: unrecognized attempt failure — honest fail, no fallback.
-                ledger.append(
-                    AttemptRecord(attempt, None, None, extract_loss_points(tail), dict(current))
-                )
+                rec = AttemptRecord(attempt, None, None, extract_loss_points(tail), dict(current))
+                ledger.append(rec)
+                if citations is not None:
+                    query = _citation_query(None, crash_text)
+                    found_miss = [c.model_dump() for c in citations.search_citations(query)]
+                    rec.citations = found_miss
+                    _emit(
+                        on_event,
+                        "citations_found",
+                        failure_key=None,
+                        query=query,
+                        citations=list(found_miss),
+                    )
                 return _failed(
                     attempt,
                     result.error,
