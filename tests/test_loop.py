@@ -742,6 +742,7 @@ def test_citations_searched_attached_to_patch_event_and_ledger():
     assert cit_ev.data["failure_key"] == "NAN_LOSS"
     assert cit_ev.data["query"].startswith("NAN_LOSS:")
     assert "pytorch LoRA fine-tuning" in cit_ev.data["query"]
+    assert "Loss is NaN" in cit_ev.data["query"]  # PLAYBOOK NAN_LOSS description present
     patch_ev = next(e for e in events if e.type == "patch_proposed")
     assert [c["title"] for c in patch_ev.data["citations"]] == ["T1", "T2"]
     assert result.attempt_ledger[0].citations[0]["url"] == "https://a.example"
@@ -792,6 +793,35 @@ def test_no_citations_client_means_no_search_behavior_change():
     assert result.attempt_ledger[0].citations == []
     patch_ev = next(e for e in events if e.type == "patch_proposed")
     assert patch_ev.data["citations"] == []
+
+
+def test_citations_searched_again_when_failure_key_changes():
+    oom_log = (
+        "Traceback (most recent call last):\n"
+        "RuntimeError: CUDA out of memory. Tried to allocate 2.00 GiB\n"
+    )
+    transport = FakeTransport([make_result(oom_log), make_result(NAN_LOG)])
+    cites = FakeCitationClient()
+    events, on_event = collect_events()
+    result = run_training_loop(
+        {"learning_rate": 0.1, "batch_size": 8, "model": "qwen2.5-0.5b"},
+        transport=transport,
+        llm=FakeLLM(),
+        on_event=on_event,
+        runs_dir=str(_tmp_runs()),
+        citations=cites,
+    )
+    assert result.success is False  # budget exhausted after mixed failures
+    assert len(cites.queries) == 2  # OOM then NAN_LOSS -> two searches
+    assert cites.queries[0].startswith("OOM:")
+    assert cites.queries[1].startswith("NAN_LOSS:")
+    cit_evs = [e for e in events if e.type == "citations_found"]
+    assert [e.data["failure_key"] for e in cit_evs] == ["OOM", "NAN_LOSS"]
+    assert result.attempt_ledger[0].failure_key == "OOM"
+    assert result.attempt_ledger[1].failure_key == "NAN_LOSS"
+    # each record carries citations (both keys searched; no cross-contamination of queries)
+    assert result.attempt_ledger[0].citations
+    assert result.attempt_ledger[1].citations
 
 
 # ---------- Task 7: loop judge_backend seam + labeled direct fallback ----------
