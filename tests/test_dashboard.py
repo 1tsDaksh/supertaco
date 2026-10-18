@@ -955,3 +955,51 @@ def test_run_failed_stays_silent_when_miss_search_is_empty(app, monkeypatch):
     md = "\n".join(m.value for m in app.markdown)
     assert "🛑 **Failed**" in md
     assert "OOM docs" not in md.split("🛑 **Failed**")[-1]  # no stale sources
+
+
+def test_patch_line_silent_when_search_returns_empty(app, monkeypatch):
+    import supertaco.agent.citations as cit
+
+    class _Cites:
+        def search_citations(self, query, *, max_results=2):
+            return []
+
+    monkeypatch.setattr(cit, "client_from_settings", lambda call_log=None: _Cites())
+    _patch_run(
+        monkeypatch,
+        FakeTransport([(NAN_LOG, None, None), (NAN_LOG, None, None)]),
+        FakeLLM(),
+    )
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    result = app.session_state["run_result"]
+    assert result.success is False  # budget exhausted after 2 NaN attempts
+    md = "\n".join(m.value for m in app.markdown)
+    assert "↳ sources:" not in md  # empty search -> silent everywhere
+    ledger_df = next(d for d in app.dataframe if "sources" in d.value.columns)
+    assert ledger_df.value["sources"][0] == "—"  # empty -> dash
+
+
+def test_run_failed_shows_keyed_sources_on_budget_exhaustion(app, monkeypatch):
+    import supertaco.agent.citations as cit
+
+    class _Cites:
+        def search_citations(self, query, *, max_results=2):
+            from supertaco.agent.citations import Citation
+
+            return [Citation(title="NaN guide", url="https://nan.example")]
+
+    monkeypatch.setattr(cit, "client_from_settings", lambda call_log=None: _Cites())
+    _patch_run(
+        monkeypatch,
+        FakeTransport([(NAN_LOG, None, None), (NAN_LOG, None, None)]),
+        FakeLLM(),
+    )
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    result = app.session_state["run_result"]
+    assert result.success is False
+    md = "\n".join(m.value for m in app.markdown)
+    # run_failed.failure_key == "NAN_LOSS" matches the attempt-1 citations_found event
+    assert "🛑 **Failed**" in md
+    assert "[NaN guide](https://nan.example)" in md.split("🛑 **Failed**")[-1]
