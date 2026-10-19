@@ -42,7 +42,7 @@ def _load_env():
 _load_env()
 
 # Read settings from environment (matching SuperTacoSettings field names)
-_SUPERTACO_ENV = os.getenv("SUPERTACO_ENV", os.getenv("SANDBOXTUNE_ENV", "dev"))
+_SUPERTACO_ENV = os.getenv("SUPERTACO_ENV") or os.getenv("SANDBOXTUNE_ENV") or "dev"
 _NEBIUS_PROJECT_ID = os.getenv("NEBIUS_PROJECT_ID", "")
 _NEBIUS_API_KEY = os.getenv("NEBIUS_API_KEY", "")
 _TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")

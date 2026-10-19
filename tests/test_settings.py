@@ -13,3 +13,9 @@ def test_supertaco_env_wins_over_legacy(monkeypatch):
     monkeypatch.setenv("SUPERTACO_ENV", "prod")
     monkeypatch.setenv("SANDBOXTUNE_ENV", "dev")
     assert SuperTacoSettings().environment == "prod"
+
+
+def test_empty_preferred_env_falls_back_to_legacy(monkeypatch):
+    monkeypatch.setenv("SUPERTACO_ENV", "")
+    monkeypatch.setenv("SANDBOXTUNE_ENV", "prod")
+    assert SuperTacoSettings().environment == "prod"
