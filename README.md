@@ -262,13 +262,15 @@ Three surfaces, one audit trail — this is the architecture the demo walks thro
 ```mermaid
 flowchart LR
     GOAL[Goal text] --> PLAN[Planner<br/>Nemotron super]
-    PLAN --> LOOP[Supervisor loop<br/>classify · patch · retry]
+    PLAN --> LOOP[Supervisor loop<br/>classify · patch · retry · judge handoff]
     subgraph COLAB["Google Colab T4 — $0 tier"]
         TRAIN[LoRA training<br/>train_lora.py] --> TLOGS[VM logs + responses]
     end
     TLOGS --> LOOP
+    LOOP -->|render config + launch (≤3 retries)| TRAIN
     LOOP -->|responses JSON| JOB["Nebius Serverless Job<br/>Nemotron judge"]
     JOB --> AUDIT[(logs/llm_calls.jsonl)]
+    JOB -.->|scores via S3| LOOP
     LOOP -->|failure key + log tail| TV[Tavily search]
     TV -.->|advisory top-2 citations| LOOP
     PLAN --> TF((Nebius Token Factory))
@@ -341,7 +343,7 @@ dashboard toggle to skip the job path entirely.
 ## Testing & hermeticity
 
 ```bash
-python -m pytest tests/ -q                # 263 tests - transport and LLM faked, no network/credits
+python -m pytest tests/ -q                # 286 tests - transport and LLM faked, no network/credits
 python -m ruff check .                    # lint
 python -m ruff format --check supertaco tests
 python -m mypy supertaco/                 # clean (21 files)
@@ -449,9 +451,9 @@ Serverless Job — live smoke passed end to end (see
 [Live verification evidence](#live-verification-evidence)). Any infra failure falls back
 to direct judging, labeled `direct_fallback`.
 
-Next up: demo video + submission (deadline 2026-10-30). Stretch (WIN_PLAN WS1.3, cut
-first if time runs short): a `NebiusTransport` that trains on a Nebius GPU with Colab kept
-as the free tier.
+Next up: demo video + submission (deadline 2026-10-30), also the remaining stretch.
+WIN_PLAN WS1.3 (a `NebiusTransport` that trains on a Nebius GPU with Colab kept as
+the free tier) was cut at Gate B (2026-10-19).
 
 ## License
 
