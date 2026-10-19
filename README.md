@@ -282,7 +282,7 @@ Planner, classifier, patcher, and judge all call **Nebius Token Factory** (Nemot
 super → ultra cost routing, table below); the judge executes as a **Nebius Serverless Job**
 (see [Judge-as-a-Nebius-Job deep dive](#judge-as-a-nebius-job-deep-dive)); training babysits a
 free Google Colab T4; every metered call — including the optional Tavily lookup — lands in the
-audit log above. The three-surface table is at the [top of this README](#how-it-works).
+audit log above. The three-surface table is at the [top of this README](#super-taco).
 
 ### Cost routing
 
@@ -346,7 +346,7 @@ dashboard toggle to skip the job path entirely.
 python -m pytest tests/ -q                # 286 tests - transport and LLM faked, no network/credits
 python -m ruff check .                    # lint
 python -m ruff format --check supertaco tests
-python -m mypy supertaco/                 # clean (21 files)
+python -m mypy supertaco/                 # clean (22 files)
 ```
 
 - The whole suite is **audit-hermetic**: an autouse fixture (`tests/conftest.py`) redirects
