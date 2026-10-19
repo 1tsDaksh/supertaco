@@ -87,14 +87,15 @@ sequenceDiagram
     participant C as container<br/>(judge_job.py)
     participant TF as Token Factory
 
-    H->>MB: ensure secret "supertaco-tf-key"<br/>(key never in job spec, env, or logs)
+    H->>MB: ensure secret "supertaco-tf-key"<br/>(key NEVER in job spec, env, or logs)
     H->>S3: ensure bucket, presign PUT URL
     H->>J: create cpu-d3 job via FileInjection<br/>(judge_job.py + responses.json)
     J-->>H: job created
-    H->>J: poll to terminal state
+    H->>J: poll (repeatedly, while job runs)
     C->>TF: score 10 answers, Nemotron Super
     TF-->>C: scores
     C->>S3: PUT scores.json (presigned)
+    J-->>H: terminal state
     H->>S3: GET scores.json, validate shape
     H->>H: merge into llm_calls.jsonl<br/>judge_backend: nebius_job + job_id
     H->>J: delete job resource (always)
@@ -103,7 +104,7 @@ sequenceDiagram
 
 Failure semantics:
 
-- Any infra failure in steps 1-7 raises `JudgeBackendError` → the loop emits a
+- Any infra failure before the cleanup step raises `JudgeBackendError` → the loop emits a
   `judge_fallback` event with the reason, re-runs the eval via direct Token Factory
   judging, and labels the batch `judge_backend: "direct_fallback"`. The dashboard shows
   "⚠ Nebius judge unavailable — fell back to direct Token Factory judging".
