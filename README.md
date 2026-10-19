@@ -228,6 +228,19 @@ Eight data-driven failure modes, each with a deterministic config patch (a new f
   + `gradient_checkpointing: true` honored by the Colab template), and relaunched
   successfully with no human input (2026-10-11).
 
+```mermaid
+flowchart TD
+    DETECT[training attempt fails] --> KEYS["8-mode playbook<br/>detects failure key"]
+    KEYS --> SEARCH[Tavily search<br/>optional, once per key]
+    SEARCH -.->|advisory top-2 citations| EVENT[patch event + ledger]
+    KEYS --> CLASSIFY[Nemotron classifies<br/>verdict + divergence flag]
+    CLASSIFY --> FIX["deterministic fix →<br/>new config in configs/runs/"]
+    FIX --> BUDGET{"relaunches left<br/>(≤3)?"}
+    BUDGET -->|"yes"| RELAUNCH[relaunch on Colab T4]
+    RELAUNCH -.-> DETECT
+    BUDGET -->|"no"| FAILED["run_failed:<br/>MaxRetriesExceeded"]
+```
+
 ### Self-researching playbook (Tavily)
 
 On every distinct failure the loop searches Tavily once (`tavily-python`) for the
