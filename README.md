@@ -77,29 +77,28 @@ Design principles, enforced in code and tests:
 This is the WS1.2 feature: the eval judge is not a local loop — it is a real Nebius
 Serverless Job. One `judge()` call executes this pipeline:
 
-```
-host (NebiusJudgeBackend)
-  1. MysteryBox: ensure secret "supertaco-tf-key" (payload key TOKEN_FACTORY_API_KEY)
-     -> the Token Factory key NEVER appears in the job spec, env list, or logs
-  2. S3: ensure bucket "supertaco-judge-artifacts"; presign a PUT URL for scores-<ts>.json
-  3. Jobs API: create cpu-d3 / 2vcpu-8gb / 10 GiB job, image python:3.12-slim
-     FileInjection (no registry push needed):
-        /supertaco/judge_job.py     <- stdlib-only scoring script (zero pip installs)
-        /supertaco/responses.json   <- prompts + base + fine-tuned answers
-     env: TOKEN_FACTORY_BASE_URL (plain) + TOKEN_FACTORY_API_KEY (MysteryBox ref)
-          + SCORES_PUT_URL (presigned) + RESPONSES_PATH
-     |
-     v
-container (judge_job.py)
-  4. scores 10 answers (5 prompts x base/ft) via Token Factory, Nemotron Super
-  5. PUTs scores.json to the presigned URL, exits
-     |
-     v
-host
-  6. polls job to terminal state -> GETs scores.json -> validates the batch shape
-  7. merges per-call entries into logs/llm_calls.jsonl with judge_backend: "nebius_job"
-     and the real job_id
-  8. cleanup, always: delete job resource (even on failure/timeout) + delete S3 object
+```mermaid
+sequenceDiagram
+    autonumber
+    participant H as host<br/>(NebiusJudgeBackend)
+    participant MB as MysteryBox
+    participant S3 as S3
+    participant J as Jobs API
+    participant C as container<br/>(judge_job.py)
+    participant TF as Token Factory
+
+    H->>MB: ensure secret "supertaco-tf-key"<br/>(key never in job spec, env, or logs)
+    H->>S3: ensure bucket, presign PUT URL
+    H->>J: create cpu-d3 job via FileInjection<br/>(judge_job.py + responses.json)
+    J-->>H: job created
+    H->>J: poll to terminal state
+    C->>TF: score 10 answers, Nemotron Super
+    TF-->>C: scores
+    C->>S3: PUT scores.json (presigned)
+    H->>S3: GET scores.json, validate shape
+    H->>H: merge into llm_calls.jsonl<br/>judge_backend: nebius_job + job_id
+    H->>J: delete job resource (always)
+    H->>S3: delete object (always)
 ```
 
 Failure semantics:
