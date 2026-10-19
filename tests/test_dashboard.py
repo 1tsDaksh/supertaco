@@ -987,7 +987,7 @@ def test_patch_line_silent_when_search_returns_empty(app, monkeypatch):
     _launch(app)
     assert not app.exception, [e.value for e in app.exception]
     result = app.session_state["run_result"]
-    assert result.success is False  # budget exhausted after 2 NaN attempts
+    assert result.success is False  # 4 NaN attempts (max_retries=3; transport re-serves last)
     md = "\n".join(m.value for m in app.markdown)
     assert "↳ sources:" not in md  # empty search -> silent everywhere
     ledger_df = next(d for d in app.dataframe if "sources" in d.value.columns)

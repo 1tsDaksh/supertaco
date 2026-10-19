@@ -6,6 +6,7 @@ import tempfile
 import pytest
 
 from supertaco.agent.citations import Citation, CitationClient
+from supertaco.agent.playbook import apply_default_fix
 from supertaco.errors import ConfigurationError, JudgeBackendError
 from supertaco.eval.harness import DEFAULT_PROMPTS, RESPONSES_END, RESPONSES_START
 from supertaco.loop import (
@@ -749,6 +750,12 @@ def test_citations_searched_attached_to_patch_event_and_ledger():
     assert result.attempt_ledger[1].citations == []  # healthy attempt: no search
     # audit entries flow into the LoopResult
     assert any(c.get("model_key") == "tavily" for c in result.llm_calls)
+    # advisory-never-patch: Tavily's top-2 citations are advisory only — the patcher
+    # must receive the engine's own fix, never Tavily's text.
+    # advisory invariant: citations never alter the applied patch (final-review pin)
+    assert result.attempt_ledger[0].config_after == apply_default_fix(
+        "NAN_LOSS", result.attempt_ledger[0].config_before
+    )
 
 
 def test_citations_searched_once_per_failure_key_and_reused_on_retry():
