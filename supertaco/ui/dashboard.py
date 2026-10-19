@@ -41,8 +41,8 @@ def _load_env():
 
 _load_env()
 
-# Read settings from environment (matching SandboxTuneSettings field names)
-_SANDBOXTUNE_ENV = os.getenv("SANDBOXTUNE_ENV", "dev")
+# Read settings from environment (matching SuperTacoSettings field names)
+_SUPERTACO_ENV = os.getenv("SUPERTACO_ENV", os.getenv("SANDBOXTUNE_ENV", "dev"))
 _NEBIUS_PROJECT_ID = os.getenv("NEBIUS_PROJECT_ID", "")
 _NEBIUS_API_KEY = os.getenv("NEBIUS_API_KEY", "")
 _TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
@@ -52,14 +52,14 @@ _TOKEN_FACTORY_BASE_URL = os.getenv(
 
 
 def get_settings():
-    """Return a settings namespace with the same fields as SandboxTuneSettings."""
+    """Return a settings namespace with the same fields as SuperTacoSettings."""
 
     class _Settings:
         nebius_api_key: str = _NEBIUS_API_KEY
         nebius_project_id: str = _NEBIUS_PROJECT_ID
         tavily_api_key: str = _TAVILY_API_KEY
         token_factory_base_url: str = _TOKEN_FACTORY_BASE_URL
-        environment: str = _SANDBOXTUNE_ENV
+        environment: str = _SUPERTACO_ENV
 
     return _Settings()
 

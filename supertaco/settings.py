@@ -1,4 +1,4 @@
-"""SandboxTune settings - loaded from .env file or environment variables."""
+"""SuperTaco settings - loaded from .env file or environment variables."""
 
 import os
 from pathlib import Path
@@ -26,8 +26,8 @@ def load_env_file(path: str = ".env"):
 load_env_file()
 
 
-class SandboxTuneSettings(BaseModel):
-    """Settings model for SandboxTune.
+class SuperTacoSettings(BaseModel):
+    """Settings model for SuperTaco.
 
     Fields read from environment variables (set by .env file on import).
     """
@@ -55,11 +55,14 @@ class SandboxTuneSettings(BaseModel):
             if env_key in os.environ and not data.get(field_name):
                 env_values[field_name] = os.environ[env_key]
 
-        # Also check for TOKEN_FACTORY_BASE_URL and SANDBOXTUNE_ENV
+        # Also check for TOKEN_FACTORY_BASE_URL and the environment alias.
+        # SUPERTACO_ENV is preferred; legacy SANDBOXTUNE_ENV stays honored (.env compat).
         if "TOKEN_FACTORY_BASE_URL" in os.environ and not data.get("token_factory_base_url"):
             env_values["token_factory_base_url"] = os.environ["TOKEN_FACTORY_BASE_URL"]
-        if "SANDBOXTUNE_ENV" in os.environ and not data.get("environment"):
-            env_values["environment"] = os.environ["SANDBOXTUNE_ENV"]
+        if not data.get("environment"):
+            legacy_env = os.environ.get("SUPERTACO_ENV") or os.environ.get("SANDBOXTUNE_ENV")
+            if legacy_env:
+                env_values["environment"] = legacy_env
 
         # Update data with env values
         data.update(env_values)
@@ -71,4 +74,4 @@ class SandboxTuneSettings(BaseModel):
 
 
 # Create global settings instance
-settings = SandboxTuneSettings()
+settings = SuperTacoSettings()
