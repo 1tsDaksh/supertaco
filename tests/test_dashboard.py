@@ -176,8 +176,22 @@ def test_default_config_helper_returns_empty_on_read_error(monkeypatch):
     assert dash._default_config() == {}
 
 
-def test_sidebar_omits_vestigial_tavily_caption(app):
-    assert not any("TAVILY" in c.value for c in app.sidebar.caption)
+def test_sidebar_shows_tavily_status_caption(app):
+    import supertaco.ui.dashboard as dash
+    from supertaco.ui.dashboard import _mask_key
+
+    caps = [c.value for c in app.sidebar.caption]
+    status = next(c for c in caps if c.startswith("🔎 Tavily citations:"))
+    key = dash._TAVILY_API_KEY
+    if key:
+        assert f"on ({_mask_key(key)})" in status
+        assert "****" in status
+        assert key not in status  # full key never rendered
+    else:
+        assert status == "🔎 Tavily citations: off (no TAVILY_API_KEY)"
+    # mask edges (folded in to keep the suite count at +2 total for this plan)
+    assert _mask_key("tvly-short") == "****"  # len < 12
+    assert _mask_key("tvly-abcdefghijkl") == "tvly-****ijkl"
 
 
 def test_sidebar_omits_api_key_block(app):

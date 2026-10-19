@@ -109,6 +109,13 @@ def reset_session2():
 
 
 # ─── UI Components ────────────────────────────────────────────────
+def _mask_key(key: str) -> str:
+    """Mask an API key for sidebar display: tvly-****abcd (short keys fully masked)."""
+    if len(key) < 12:
+        return "****"
+    return f"{key[:5]}****{key[-4:]}"
+
+
 def render_sidebar() -> Dict[str, Any]:
     """Render the sidebar with controls and settings."""
     st.sidebar.title("⚙️ Controls")
@@ -127,6 +134,10 @@ def render_sidebar() -> Dict[str, Any]:
     st.sidebar.caption(
         "Start at nano → escalate to super on low confidence → ultra only when playbook misses"
     )
+    if _TAVILY_API_KEY:
+        st.sidebar.caption(f"🔎 Tavily citations: on ({_mask_key(_TAVILY_API_KEY)})")
+    else:
+        st.sidebar.caption("🔎 Tavily citations: off (no TAVILY_API_KEY)")
 
     st.sidebar.markdown("### Max Retries")
     st.session_state["max_retries"] = st.sidebar.number_input(
