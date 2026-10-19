@@ -750,9 +750,7 @@ def test_citations_searched_attached_to_patch_event_and_ledger():
     assert result.attempt_ledger[1].citations == []  # healthy attempt: no search
     # audit entries flow into the LoopResult
     assert any(c.get("model_key") == "tavily" for c in result.llm_calls)
-    # advisory-never-patch: Tavily's top-2 citations are advisory only — the patcher
-    # must receive the engine's own fix, never Tavily's text.
-    # advisory invariant: citations never alter the applied patch (final-review pin)
+    # advisory-never-patch: citations/LLM proposal never alter applied config — final = default fix
     assert result.attempt_ledger[0].config_after == apply_default_fix(
         "NAN_LOSS", result.attempt_ledger[0].config_before
     )
