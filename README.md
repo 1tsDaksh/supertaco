@@ -29,7 +29,7 @@ Three Nebius/NVIDIA surfaces, all live:
 5. [Configuration](#configuration)
 6. [Goal-driven runs](#goal-driven-runs)
 7. [Failure playbook](#failure-playbook)
-8. [Nemotron / Token Factory usage & cost routing](#nemotron--token-factory-usage--cost-routing)
+8. [NVIDIA & Nebius usage](#nvidia--nebius-usage)
 9. [Dashboard](#dashboard)
 10. [Environment variables](#environment-variables)
 11. [Testing & hermeticity](#testing--hermeticity)
@@ -255,7 +255,34 @@ fix stays authoritative. Search calls are audited like every other model call
 
 ---
 
-## Nemotron / Token Factory usage & cost routing
+## NVIDIA & Nebius usage
+
+Three surfaces, one audit trail — this is the architecture the demo walks through:
+
+```mermaid
+flowchart LR
+    GOAL[Goal text] --> PLAN[Planner<br/>Nemotron super]
+    PLAN --> LOOP[Supervisor loop<br/>classify · patch · retry]
+    subgraph COLAB["Google Colab T4 — $0 tier"]
+        TRAIN[LoRA training<br/>train_lora.py] --> TLOGS[VM logs + responses]
+    end
+    TLOGS --> LOOP
+    LOOP -->|responses JSON| JOB["Nebius Serverless Job<br/>Nemotron judge"]
+    JOB --> AUDIT[(logs/llm_calls.jsonl)]
+    LOOP -->|failure key + log tail| TV[Tavily search]
+    TV -.->|advisory top-2 citations| LOOP
+    PLAN --> TF((Nebius Token Factory))
+    LOOP --> TF
+    JOB --> TF
+```
+
+Planner, classifier, patcher, and judge all call **Nebius Token Factory** (Nemotron nano →
+super → ultra cost routing, table below); the judge executes as a **Nebius Serverless Job**
+(see [Judge-as-a-Nebius-Job deep dive](#judge-as-a-nebius-job-deep-dive)); training babysits a
+free Google Colab T4; every metered call — including the optional Tavily lookup — lands in the
+audit log above. The three-surface table is at the [top of this README](#how-it-works).
+
+### Cost routing
 
 | Role | Model | When |
 |---|---|---|
