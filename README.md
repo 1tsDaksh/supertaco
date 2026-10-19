@@ -44,13 +44,13 @@ Three Nebius/NVIDIA surfaces, all live:
 
 ```mermaid
 flowchart TD
-    ENTRY["dashboard / CLI<br/>supertaco run colab_t4.yaml"] --> LOOP[Supervisor loop<br/>initial attempt + ≤3 relaunches]
+    ENTRY["dashboard / CLI<br/>supertaco run configs/defaults/colab_t4.yaml"] --> LOOP[Supervisor loop<br/>initial attempt + ≤3 relaunches]
     subgraph COLAB["Google Colab T4 — $0 tier"]
         TRAIN[LoRA training<br/>train_lora.py] --> TLOGS["streamed loss lines<br/>+ lora_adapter.zip artifact"]
     end
     LOOP -->|"render config + launch"| TRAIN
     TLOGS --> EVAL["on-VM eval<br/>5-prompt base vs fine-tuned suite"]
-    EVAL --> JUDGE{"Nemotron judge (job or direct)<br/>avg(ft) ≥ 0.9 × avg(base)?"}
+    EVAL --> JUDGE{"Nemotron judge (Nebius job default, or direct)<br/>avg(ft) ≥ 0.9 × avg(base)?"}
     JUDGE -->|"yes"| SUCCESS[run_succeeded<br/>attempt-ledger report]
     JUDGE -->|"regression / train failure"| CLASSIFY["8-mode playbook<br/>+ Nemotron classify"]
     CLASSIFY --> PATCH["deterministic fix →<br/>new config in configs/runs/"]
