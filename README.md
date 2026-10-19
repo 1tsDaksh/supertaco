@@ -267,7 +267,7 @@ flowchart LR
         TRAIN[LoRA training<br/>train_lora.py] --> TLOGS[VM logs + responses]
     end
     TLOGS --> LOOP
-    LOOP -->|render config + launch (≤3 retries)| TRAIN
+    LOOP -->|"render config + launch (≤3 retries)"| TRAIN
     LOOP -->|responses JSON| JOB["Nebius Serverless Job<br/>Nemotron judge"]
     JOB --> AUDIT[(logs/llm_calls.jsonl)]
     JOB -.->|scores via S3| LOOP
