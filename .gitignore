@@ -34,6 +34,7 @@ secrets.json
 # Logs
 logs/*.jsonl
 logs/*.log
+logs/runs/
 
 # Runtime artifacts from dashboard runs (cwd-relative under supertaco/)
 supertaco/logs/
