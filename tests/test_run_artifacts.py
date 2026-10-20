@@ -135,3 +135,30 @@ def test_default_run_generates_run_id_and_null_goal(tmp_path, monkeypatch):
     assert re.fullmatch(r"[0-9a-f]{8}", art["run_id"])
     assert art["goal"] is None
     assert art["config_path"] is None
+
+
+def test_run_id_contextvar_not_leaked_after_success_and_crash(tmp_path, monkeypatch):
+    from supertaco import runlog
+
+    monkeypatch.delenv("SUPERTACO_RUN_ID", raising=False)
+    run_training_loop(dict(CFG), transport=FakeTransport(), llm=FakeLLM(), run_id="leaksucc1")
+    assert runlog.current_run_id() is None
+
+    class BoomLLM(FakeLLM):
+        def classify_failure(self, logs):
+            raise RuntimeError("boom")
+
+    transport = FakeTransport(logs="step 4 loss NaN\ntraining finished\n", error="CUDA exploded")
+    with pytest.raises(RuntimeError, match="boom"):
+        run_training_loop(dict(CFG), transport=transport, llm=BoomLLM(), run_id="leakcrash")
+    assert runlog.current_run_id() is None
+
+
+def test_wrapper_resolves_run_id_from_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("SUPERTACO_RUN_ID", "envart99")
+    result = run_training_loop(dict(CFG), transport=FakeTransport(), llm=FakeLLM())
+    assert result.success is True
+    path = tmp_path / "logs" / "runs" / "envart99.json"
+    assert path.exists(), f"missing artifact {path}"
+    art = json.loads(path.read_text(encoding="utf-8"))
+    assert art["run_id"] == "envart99"

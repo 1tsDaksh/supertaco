@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import time
+import warnings
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -199,19 +200,22 @@ def run_training_loop(
             citations=citations,
         )
     except BaseException as exc:
-        write_run_artifact(
-            rid,
-            _build_artifact(
-                run_id=rid,
-                goal=goal,
-                config_path=config_path,
-                started_wall=started_wall,
-                events=collected,
-                result=None,
-                error=f"{type(exc).__name__}: {exc}",
-                llm_calls=list(getattr(llm, "call_log", [])) if llm is not None else [],
-            ),
-        )
+        try:
+            write_run_artifact(
+                rid,
+                _build_artifact(
+                    run_id=rid,
+                    goal=goal,
+                    config_path=config_path,
+                    started_wall=started_wall,
+                    events=collected,
+                    result=None,
+                    error=f"{type(exc).__name__}: {exc}",
+                    llm_calls=list(getattr(llm, "call_log", [])) if llm is not None else [],
+                ),
+            )
+        except Exception as build_exc:  # receipt failure must never mask the crash
+            warnings.warn(f"run artifact write failed: {build_exc}", stacklevel=2)
         raise
     finally:
         reset_run_id(token)
@@ -246,6 +250,8 @@ def _build_artifact(
 
     `result` is None on an unexpected crash — success/error/events carry the story;
     attempts and failure_keys are recovered from the captured events instead.
+    `final_config` is the LAST CONFIG FILE PATH written (`configs_written[-1]`,
+    may be None), not a config dict.
     """
     eval_results = result.eval_results if result else None
     ledger = result.attempt_ledger if result else []
@@ -275,7 +281,9 @@ def _build_artifact(
         failure_keys = [
             ev["data"]["failure_key"]
             for ev in events
-            if ev.get("type") == "failure_detected" and ev.get("data", {}).get("failure_key")
+            if ev.get("type") == "failure_detected"
+            and isinstance(ev.get("data"), dict)
+            and ev["data"].get("failure_key")
         ]
         attempts = 0
         for ev in reversed(events):
