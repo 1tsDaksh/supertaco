@@ -50,6 +50,9 @@ def reset_run_id(token: contextvars.Token) -> None:
 def write_run_artifact(run_id: str, data: dict[str, Any]) -> Path:
     """Write logs/runs/<run_id>.json (UTF-8, ensure_ascii=False, indent 2).
 
+    Caller must pass a resolved id (see resolve_run_id); raw ids must not contain
+    path separators or "..".
+
     Returns the intended path. An OSError is warned, never raised (spec 6), matching
     the audit writer's behavior.
     """

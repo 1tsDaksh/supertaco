@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 import supertaco.runlog as runlog
 
 
@@ -39,3 +41,12 @@ def test_write_run_artifact_writes_json_through_seam(tmp_path):
     assert path == tmp_path / "logs" / "runs" / "abc123ef.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data == {"schema": 1, "success": True}
+
+
+def test_write_run_artifact_oserror_warns_and_never_raises(monkeypatch, tmp_path):
+    p = tmp_path / "logs"
+    p.write_text("x", encoding="utf-8")  # logs is a FILE -> mkdir fails
+    monkeypatch.setattr(runlog, "_logs_dir", lambda: p)
+    with pytest.warns(UserWarning, match="run artifact write failed"):
+        path = runlog.write_run_artifact("deadbeef", {"schema": 1})
+    assert path == p / "runs" / "deadbeef.json"
