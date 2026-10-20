@@ -231,7 +231,7 @@ Eight data-driven failure modes, each with a deterministic config patch (a new f
 ```mermaid
 flowchart TD
     DETECT[training attempt fails] --> KEYS["8-mode playbook<br/>detects failure key"]
-    KEYS -->     SEARCH["Tavily search<br/>optional, once per key"]
+    KEYS --> SEARCH["Tavily search<br/>optional, once per key"]
     SEARCH -.->|advisory top-2 citations| EVENT[patch event + ledger]
     KEYS --> CLASSIFY[Nemotron classifies<br/>verdict + divergence flag]
     CLASSIFY --> FIX["deterministic fix →<br/>new config in configs/runs/"]
