@@ -325,3 +325,30 @@ def test_generation_completes_with_one_flaky_chunk(monkeypatch):
     assert len(rows) == 50
     assert attempts["n"] == 3  # flaky chunk skipped, later chunks still ran
     assert [entry["mode"] for entry in client.call_log] == ["real", "fallback", "real"]
+
+
+def test_record_stamps_contextvar_run_id(tmp_path):
+    import supertaco.runlog as runlog
+
+    client = _client()
+    token = runlog.set_run_id("ctxrun34")
+    try:
+        client._record(
+            "classify", "model-id", "NAN_LOSS", mode="real", latency=0.01, tokens=7, error=None
+        )
+    finally:
+        runlog.reset_run_id(token)
+    assert client.call_log[0]["run_id"] == "ctxrun34"
+    line = (tmp_path / "logs" / "llm_calls.jsonl").read_text(encoding="utf-8").strip()
+    assert json.loads(line)["run_id"] == "ctxrun34"
+
+
+def test_record_run_id_null_without_context_or_env(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPERTACO_RUN_ID", raising=False)
+    client = _client()
+    client._record(
+        "classify", "model-id", "NAN_LOSS", mode="real", latency=0.01, tokens=7, error=None
+    )
+    assert client.call_log[0]["run_id"] is None
+    line = (tmp_path / "logs" / "llm_calls.jsonl").read_text(encoding="utf-8").strip()
+    assert json.loads(line)["run_id"] is None
