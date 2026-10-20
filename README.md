@@ -295,7 +295,7 @@ Planner, classifier, patcher, and judge all call **Nebius Token Factory** (Nemot
 super → ultra cost routing, table below); the judge executes as a **Nebius Serverless Job**
 (see [Judge-as-a-Nebius-Job deep dive](#judge-as-a-nebius-job-deep-dive)); training babysits a
 free Google Colab T4; every metered call — including the optional Tavily lookup — lands in the
-audit log above. The three-surface table is at the [top of this README](#super-taco).
+audit log above. The three-surface table is at the [top of this README](#supertaco).
 
 ### Cost routing
 
