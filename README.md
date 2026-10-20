@@ -198,6 +198,16 @@ chat_template: llama-3
 
 Instead of a static config, describe what you want the model to learn:
 
+```mermaid
+flowchart LR
+    GOAL[free-text goal] --> PLAN[Nemotron plans<br/>config + 5 eval prompts]
+    PLAN --> DATA["synthetic ~150 rows<br/>or named HF dataset"]
+    DATA --> REVIEW{review:<br/>edit knobs + prompts}
+    REVIEW -->|accept| RUN[run on Colab T4]
+    RUN --> REPORT["report:<br/>before→after judge delta"]
+    REPORT -->|"feedback text"| PLAN
+```
+
 - **Dashboard:** type a goal → **Plan with Nemotron** → review the dataset source
   (synthetic ~150 generated rows, or a named Hugging Face dataset), edit the config knobs
   and the 5 domain eval prompts → **Run**.
