@@ -115,6 +115,7 @@ def run_config(
     print(f"SuperTaco: running {config_path}")
     llm = llm if llm is not None else make_llm()
     transport = transport if transport is not None else _make_transport()
+    used_path = config_path
     if feedback:
         goal = config.get("goal") if isinstance(config, dict) else None
         if not isinstance(goal, str) or not goal.strip():
@@ -123,14 +124,17 @@ def run_config(
             )
         config, revised = revise_run_config(feedback, config, goal.strip(), llm)
         path = _write_plan_yaml(config, "_revised")
+        used_path = str(path)
         print(f"Revised plan written: {path} (mode={revised.plan_mode})")
         if revised.revision_note:
             print(f"note: {revised.revision_note}")
         if revised.plan_mode == "fallback":
             print("warning: revision fell back to the previous plan")
     eval_prompts = config.pop("eval_prompts", None) if isinstance(config, dict) else None
+    goal_value: str | None = None
     if isinstance(config, dict):
-        config.pop("goal", None)
+        popped_goal = config.pop("goal", None)
+        goal_value = popped_goal if isinstance(popped_goal, str) else None
         config.pop("revision_note", None)
     if eval_prompts is not None and (
         not isinstance(eval_prompts, list)
@@ -149,6 +153,8 @@ def run_config(
             on_event=printer,
             prompts=eval_prompts,
             judge_backend=judge_backend,
+            goal=goal_value,
+            config_path=used_path,
         )
     except ConfigurationError as exc:
         raise SystemExit(str(exc)) from exc

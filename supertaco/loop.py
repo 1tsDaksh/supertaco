@@ -11,7 +11,8 @@ EVAL_REGRESSION (spec 2026-09-29-colab-real-loop-design.md).
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+import time
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Optional, Protocol
@@ -146,6 +147,168 @@ def make_llm():
 
 
 def run_training_loop(
+    config: dict,
+    *,
+    transport: AttemptTransport,
+    llm: Any = None,
+    on_event: Optional[OnEvent] = None,
+    on_line: Optional[OnLine] = None,
+    max_retries: int = 3,
+    runs_dir: str = "configs/runs",
+    prompts: Optional[list[str]] = None,
+    judge_backend: str = "direct",
+    citations: Any = None,
+    goal: Optional[str] = None,
+    run_id: Optional[str] = None,
+    config_path: Optional[str] = None,
+) -> LoopResult:
+    """Run attempts until the judge passes or the relaunch budget is spent.
+
+    max_retries counts RELAUNCHES: initial attempt + up to max_retries
+    relaunches. Validation failures and transport errors return a failed
+    LoopResult (never raise) with an actionable message (spec D9).
+    citations: optional CitationClient; None builds one from settings (or skips when no key).
+
+    Traceability (WS4): resolves the run id (explicit > SUPERTACO_RUN_ID > generated),
+    stamps it for the duration of the run, and writes a schema-v1 artifact to
+    logs/runs/<run_id>.json on every exit path — success, failure, and exception.
+    """
+    from supertaco.runlog import reset_run_id, resolve_run_id, set_run_id, write_run_artifact
+
+    rid = resolve_run_id(run_id)
+    token = set_run_id(rid)
+    started_wall = time.time()
+    collected: list[dict[str, Any]] = []
+
+    def _capture(event: Event) -> None:
+        collected.append({"type": event.type, "data": event.data})
+        if on_event is not None:
+            on_event(event)
+
+    try:
+        result = _run_loop(
+            config,
+            transport=transport,
+            llm=llm,
+            on_event=_capture,
+            on_line=on_line,
+            max_retries=max_retries,
+            runs_dir=runs_dir,
+            prompts=prompts,
+            judge_backend=judge_backend,
+            citations=citations,
+        )
+    except BaseException as exc:
+        write_run_artifact(
+            rid,
+            _build_artifact(
+                run_id=rid,
+                goal=goal,
+                config_path=config_path,
+                started_wall=started_wall,
+                events=collected,
+                result=None,
+                error=f"{type(exc).__name__}: {exc}",
+                llm_calls=list(getattr(llm, "call_log", [])) if llm is not None else [],
+            ),
+        )
+        raise
+    finally:
+        reset_run_id(token)
+    write_run_artifact(
+        rid,
+        _build_artifact(
+            run_id=rid,
+            goal=goal,
+            config_path=config_path,
+            started_wall=started_wall,
+            events=collected,
+            result=result,
+            error=result.error,
+            llm_calls=list(result.llm_calls),
+        ),
+    )
+    return result
+
+
+def _build_artifact(
+    *,
+    run_id: str,
+    goal: Optional[str],
+    config_path: Optional[str],
+    started_wall: float,
+    events: list[dict[str, Any]],
+    result: Optional[LoopResult],
+    error: Optional[str],
+    llm_calls: list[dict],
+) -> dict[str, Any]:
+    """Schema-v1 per-run summary: sweep receipts and showcase input (WS4).
+
+    `result` is None on an unexpected crash — success/error/events carry the story;
+    attempts and failure_keys are recovered from the captured events instead.
+    """
+    eval_results = result.eval_results if result else None
+    ledger = result.attempt_ledger if result else []
+    eval_block: Optional[dict[str, Any]] = None
+    if eval_results:
+        base_scores = list(eval_results.get("base_scores") or [])
+        ft_scores = list(eval_results.get("fine_tuned_scores") or [])
+        base_avg = sum(base_scores) / len(base_scores) if base_scores else None
+        ft_avg = sum(ft_scores) / len(ft_scores) if ft_scores else None
+        eval_block = {
+            "prompts": list(eval_results.get("prompts") or []),
+            "base_scores": base_scores,
+            "fine_tuned_scores": ft_scores,
+            "base_avg": base_avg,
+            "ft_avg": ft_avg,
+            "delta": (ft_avg - base_avg) if base_avg is not None and ft_avg is not None else None,
+            "modes": list(eval_results.get("modes") or []),
+            "regression_flagged": bool(eval_results.get("regression_flagged", False)),
+        }
+    if result is not None:
+        failure_keys = [rec.failure_key for rec in ledger if rec.failure_key]
+        attempts = result.attempts
+        final_config = result.configs_written[-1] if result.configs_written else None
+        healed = bool(result.success and failure_keys)
+        success = bool(result.success)
+    else:
+        failure_keys = [
+            ev["data"]["failure_key"]
+            for ev in events
+            if ev.get("type") == "failure_detected" and ev.get("data", {}).get("failure_key")
+        ]
+        attempts = 0
+        for ev in reversed(events):
+            if isinstance(ev.get("data"), dict) and "attempt" in ev["data"]:
+                attempts = int(ev["data"]["attempt"])
+                break
+        final_config = None
+        healed = False
+        success = False
+    finished_wall = time.time()
+    return {
+        "schema": 1,
+        "run_id": run_id,
+        "goal": goal,
+        "config_path": config_path,
+        "started": datetime.fromtimestamp(started_wall, UTC).isoformat(),
+        "finished": datetime.fromtimestamp(finished_wall, UTC).isoformat(),
+        "wall_clock_s": round(finished_wall - started_wall, 3),
+        "success": success,
+        "attempts": attempts,
+        "failure_keys": failure_keys,
+        "healed": healed,
+        "final_config": final_config,
+        "judge_backend": eval_results.get("judge_backend") if eval_results else None,
+        "eval": eval_block,
+        "events": events,
+        "attempt_ledger": [asdict(rec) for rec in ledger],
+        "llm_calls": llm_calls,
+        "error": error,
+    }
+
+
+def _run_loop(
     config: dict,
     *,
     transport: AttemptTransport,

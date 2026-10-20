@@ -546,6 +546,7 @@ def execute_launch(
             runs_dir="configs/runs",
             prompts=prompts,
             judge_backend=judge_backend,
+            goal=(st.session_state.get("plan_goal") or None),
         )
     finally:
         st.session_state["run_active"] = False

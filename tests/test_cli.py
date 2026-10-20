@@ -346,3 +346,15 @@ def test_main_run_defaults_judge_backend_to_nebius_job(tmp_path, monkeypatch, ca
     seen = _stub_loop(monkeypatch)
     cli.main(["run", str(_write_cfg(tmp_path))])
     assert seen["judge_backend"] == "nebius_job"
+
+
+def test_run_config_passes_goal_and_config_path_to_loop(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "_make_transport", lambda: FakeTransport())
+    seen = _stub_loop(monkeypatch)
+    cfg = {"model": "qwen2.5-0.5b", "learning_rate": 2e-4, "goal": "pirate chef"}
+    path = tmp_path / "plan_g.yaml"
+    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    cli.run_config(str(path), llm=FakeLLM())
+    assert seen["goal"] == "pirate chef"
+    assert seen["config_path"] == str(path)

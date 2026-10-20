@@ -1017,3 +1017,25 @@ def test_run_failed_shows_keyed_sources_on_budget_exhaustion(app, monkeypatch):
     # run_failed.failure_key == "NAN_LOSS" matches the attempt-1 citations_found event
     assert "🛑 **Failed**" in md
     assert "[NaN guide](https://nan.example)" in md.split("🛑 **Failed**")[-1]
+
+
+def test_execute_launch_passes_plan_goal_to_loop(offline, monkeypatch):
+    import supertaco.loop as loop_mod
+    from supertaco.loop import LoopResult
+
+    seen = {}
+
+    def fake_loop(config, **kwargs):
+        seen.update(kwargs)
+        return LoopResult(True, 1, dict(config), [], None, None, [])
+
+    monkeypatch.setattr(loop_mod, "run_training_loop", fake_loop)
+    at = AppTest.from_file(str(DASHBOARD), default_timeout=60)
+    at.session_state["plan_goal"] = "pirate chef"
+    at.run()
+    assert not at.exception, f"render crashed: {[e.value for e in at.exception]}"
+    run_btn = next(b for b in at.button if "Fine-tune on Colab" in b.label)
+    run_btn.click()
+    at.run()
+    assert not at.exception, f"run crashed: {[e.value for e in at.exception]}"
+    assert seen.get("goal") == "pirate chef"
