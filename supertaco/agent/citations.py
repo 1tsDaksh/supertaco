@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional
 from pydantic import BaseModel
 
 from supertaco.paths import repo_root
+from supertaco.runlog import current_run_id
 
 
 def _logs_dir() -> Path:
@@ -103,6 +104,7 @@ class CitationClient:
             "error": error,
             "timestamp": time.time(),
             "response_preview": "; ".join(c.title for c in citations)[:200] or query[:200],
+            "run_id": current_run_id(),
         }
         self.call_log.append(entry)
         try:

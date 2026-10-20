@@ -273,3 +273,21 @@ def test_logs_dir_defaults_to_repo_root(monkeypatch):
     from supertaco.paths import repo_root
 
     assert nb_module._logs_dir() == repo_root() / "logs"
+
+
+def test_judge_audit_entries_carry_run_id():
+    import supertaco.eval.nebius_backend as nb_module
+    import supertaco.runlog as runlog
+
+    backend = _backend()
+    prompts = [f"p{i}" for i in range(5)]
+    base = {p: "b" for p in prompts}
+    ft = {p: "f" for p in prompts}
+    token = runlog.set_run_id("nbrun11")
+    try:
+        result = backend.judge(prompts, base, ft)
+    finally:
+        runlog.reset_run_id(token)
+    assert result["call_log"][0]["run_id"] == "nbrun11"
+    lines = (nb_module._logs_dir() / "llm_calls.jsonl").read_text(encoding="utf-8").splitlines()
+    assert json.loads(lines[-1])["run_id"] == "nbrun11"

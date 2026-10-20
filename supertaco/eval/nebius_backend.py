@@ -15,6 +15,7 @@ from typing import Any, Optional
 from supertaco.errors import JudgeBackendError
 from supertaco.gpu.nebius_jobs import JobOutcome, JobRequest, NebiusJobsClient
 from supertaco.paths import repo_root
+from supertaco.runlog import current_run_id
 
 JUDGE_SCRIPT_PATH = Path(__file__).resolve().parent / "judge_job.py"
 SECRET_NAME = "supertaco-tf-key"
@@ -329,6 +330,7 @@ class NebiusJudgeBackend:
                 "response_preview": str(entry.get("response_preview") or "")[:200],
                 "judge_backend": "nebius_job",
                 "job_id": outcome.job_id,
+                "run_id": current_run_id(),
             }
             for entry in batch.get("call_log", [])
             if isinstance(entry, dict)

@@ -130,3 +130,31 @@ def test_null_fields_do_not_render_none_strings():
     assert out[0].title == "untitled"
     assert out[0].url == "https://x"
     assert out[0].content == ""
+
+
+def test_record_stamps_contextvar_run_id():
+    import supertaco.agent.citations as cit
+    import supertaco.runlog as runlog
+
+    call_log = []
+    client = CitationClient("tvly-test", search=lambda q, max_results=2: RAW, call_log=call_log)
+    token = runlog.set_run_id("citrun77")
+    try:
+        client.search_citations("q")
+    finally:
+        runlog.reset_run_id(token)
+    assert call_log[0]["run_id"] == "citrun77"
+    line = (cit._logs_dir() / "llm_calls.jsonl").read_text(encoding="utf-8").strip()
+    assert json.loads(line)["run_id"] == "citrun77"
+
+
+def test_record_run_id_null_without_context_or_env(monkeypatch):
+    import supertaco.agent.citations as cit
+
+    monkeypatch.delenv("SUPERTACO_RUN_ID", raising=False)
+    call_log = []
+    client = CitationClient("tvly-test", search=lambda q, max_results=2: RAW, call_log=call_log)
+    client.search_citations("q")
+    assert call_log[0]["run_id"] is None
+    line = (cit._logs_dir() / "llm_calls.jsonl").read_text(encoding="utf-8").strip()
+    assert json.loads(line)["run_id"] is None
