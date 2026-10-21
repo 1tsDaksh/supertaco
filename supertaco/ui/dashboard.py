@@ -23,6 +23,7 @@ from supertaco.errors import ConfigurationError
 from supertaco.eval.harness import PROMPT_SUITE_SIZE
 from supertaco.loop import Event, extract_loss_points, make_llm, run_training_loop
 from supertaco.planner import materialize_dataset, plan_run, plan_to_config, revise_run_config
+from supertaco.ui.secrets_bridge import inject_secrets
 
 st.set_page_config(page_title="SuperTaco", page_icon="🌮")
 
@@ -44,6 +45,15 @@ def _load_env():
 
 
 _load_env()
+
+# Community Cloud: no .env file — the Token Factory key arrives via st.secrets and must
+# reach supertaco.settings (env name NEBIUS_API_KEY). Rebuild the settings singleton only
+# when a key was actually injected; make_llm()/judge read it at call time, and local runs
+# (no secrets) keep the original instance so the offline test seam stays intact.
+if inject_secrets(st.secrets):
+    import supertaco.settings as _settings_mod
+
+    _settings_mod.settings = _settings_mod.SuperTacoSettings()
 
 # Read settings from environment (matching SuperTacoSettings field names)
 _SUPERTACO_ENV = os.getenv("SUPERTACO_ENV") or os.getenv("SANDBOXTUNE_ENV") or "dev"
