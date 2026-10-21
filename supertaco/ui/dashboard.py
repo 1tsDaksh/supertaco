@@ -14,6 +14,7 @@ from typing import Any, Dict
 import plotly.graph_objects as go  # type: ignore[import-untyped]  # plotly ships no stubs
 import streamlit as st
 import yaml
+from streamlit.errors import StreamlitSecretNotFoundError
 
 from supertaco.errors import ConfigurationError
 from supertaco.eval.harness import PROMPT_SUITE_SIZE
@@ -57,7 +58,7 @@ def _showcase_enabled() -> bool:
     if raw is None:
         try:
             raw = st.secrets["SUPERTACO_SHOWCASE"]
-        except Exception:
+        except (KeyError, FileNotFoundError, StreamlitSecretNotFoundError):
             raw = None
     return str(raw or "").strip().lower() in {"1", "true", "yes"}
 
@@ -732,6 +733,9 @@ def main():
         logs_slot = st.empty()
         chart_slot = st.empty()
 
+        if run_clicked and _SHOWCASE:
+            st.warning("Training is disabled in showcase mode.")
+            run_clicked = False
         if run_clicked:
             st.session_state["run_result"] = None  # never trust a stale result
             st.session_state["llm_calls"] = []  # stale calls must not outlive a failed run

@@ -111,7 +111,8 @@ def _patch_run(monkeypatch, transport, llm):
 
 
 @pytest.fixture()
-def app(offline):
+def app(offline, monkeypatch):
+    monkeypatch.delenv("SUPERTACO_SHOWCASE", raising=False)
     at = AppTest.from_file(str(DASHBOARD), default_timeout=60)
     at.session_state["judge_on_nebius"] = False
     at.run()
@@ -1051,6 +1052,15 @@ def test_showcase_banner_and_disabled_controls(offline, monkeypatch):
     assert run_btn.disabled
     judge_box = next(c for c in at.checkbox if "Judge on Nebius" in c.label)
     assert judge_box.disabled
+    plan_btn = next(b for b in at.button if "Plan with Nemotron" in b.label)
+    assert not plan_btn.disabled
+    # disabled= is UX only: the server-side guard must block a crafted click too
+    transport = FakeTransport([(HEALTHY_LOG, "ok", None)])
+    _patch_run(monkeypatch, transport, FakeLLM())
+    run_btn.click().run()
+    assert not at.exception, f"showcase run crashed: {[e.value for e in at.exception]}"
+    assert transport.calls == 0
+    assert any("Training is disabled in showcase mode" in w.value for w in at.warning)
 
 
 def test_non_showcase_banner_absent_controls_enabled(app):
@@ -1059,3 +1069,12 @@ def test_non_showcase_banner_absent_controls_enabled(app):
     assert not run_btn.disabled
     judge_box = next(c for c in app.checkbox if "Judge on Nebius" in c.label)
     assert not judge_box.disabled
+
+
+def test_showcase_env_wins_over_secrets(offline, monkeypatch):
+    monkeypatch.setenv("SUPERTACO_SHOWCASE", "1")
+    at = AppTest.from_file(str(DASHBOARD), default_timeout=60)
+    at.secrets["SUPERTACO_SHOWCASE"] = "false"
+    at.run()
+    assert not at.exception, f"render crashed: {[e.value for e in at.exception]}"
+    assert any("Showcase mode" in i.value for i in at.info)
