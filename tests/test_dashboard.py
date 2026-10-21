@@ -1021,6 +1021,7 @@ def test_run_failed_shows_keyed_sources_on_budget_exhaustion(app, monkeypatch):
 
 
 def test_execute_launch_passes_plan_goal_to_loop(offline, monkeypatch):
+    monkeypatch.delenv("SUPERTACO_SHOWCASE", raising=False)
     import supertaco.loop as loop_mod
     from supertaco.loop import LoopResult
 
@@ -1078,3 +1079,26 @@ def test_showcase_env_wins_over_secrets(offline, monkeypatch):
     at.run()
     assert not at.exception, f"render crashed: {[e.value for e in at.exception]}"
     assert any("Showcase mode" in i.value for i in at.info)
+
+
+def test_showcase_malformed_secrets_file_fails_loud(monkeypatch, tmp_path):
+    import streamlit as st
+    from streamlit import config
+    from streamlit.errors import StreamlitSecretNotFoundError
+
+    import supertaco.ui.dashboard as dash
+
+    bad = tmp_path / "secrets.toml"
+    bad.write_text('x = "unterminated', encoding="utf-8")
+    real_get_option = config.get_option
+
+    def fake_get_option(key):
+        if key == "secrets.files":
+            return [str(bad)]
+        return real_get_option(key)
+
+    monkeypatch.delenv("SUPERTACO_SHOWCASE", raising=False)
+    monkeypatch.setattr(config, "get_option", fake_get_option)
+    monkeypatch.setattr(st.secrets, "_secrets", None)
+    with pytest.raises(StreamlitSecretNotFoundError):
+        dash._showcase_enabled()

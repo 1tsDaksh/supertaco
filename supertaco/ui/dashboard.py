@@ -14,6 +14,7 @@ from typing import Any, Dict
 import plotly.graph_objects as go  # type: ignore[import-untyped]  # plotly ships no stubs
 import streamlit as st
 import yaml
+from streamlit import config
 from streamlit.errors import StreamlitSecretNotFoundError
 
 from supertaco.errors import ConfigurationError
@@ -58,7 +59,14 @@ def _showcase_enabled() -> bool:
     if raw is None:
         try:
             raw = st.secrets["SUPERTACO_SHOWCASE"]
-        except (KeyError, FileNotFoundError, StreamlitSecretNotFoundError):
+        except StreamlitSecretNotFoundError:
+            # Streamlit raises this for both a missing secrets file and a
+            # malformed one; a configured-but-broken file must fail loud.
+            # Must precede the FileNotFoundError clause: it subclasses it.
+            if any(Path(p).exists() for p in config.get_option("secrets.files")):
+                raise
+            raw = None
+        except (KeyError, FileNotFoundError):
             raw = None
     return str(raw or "").strip().lower() in {"1", "true", "yes"}
 
