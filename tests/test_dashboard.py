@@ -1039,3 +1039,23 @@ def test_execute_launch_passes_plan_goal_to_loop(offline, monkeypatch):
     at.run()
     assert not at.exception, f"run crashed: {[e.value for e in at.exception]}"
     assert seen.get("goal") == "pirate chef"
+
+
+def test_showcase_banner_and_disabled_controls(offline, monkeypatch):
+    monkeypatch.setenv("SUPERTACO_SHOWCASE", "1")
+    at = AppTest.from_file(str(DASHBOARD), default_timeout=60)
+    at.run()
+    assert not at.exception, f"showcase render crashed: {[e.value for e in at.exception]}"
+    assert any("Showcase mode" in i.value for i in at.info)
+    run_btn = next(b for b in at.button if "Fine-tune on Colab" in b.label)
+    assert run_btn.disabled
+    judge_box = next(c for c in at.checkbox if "Judge on Nebius" in c.label)
+    assert judge_box.disabled
+
+
+def test_non_showcase_banner_absent_controls_enabled(app):
+    assert not any("Showcase mode" in i.value for i in app.info)
+    run_btn = next(b for b in app.button if "Fine-tune on Colab" in b.label)
+    assert not run_btn.disabled
+    judge_box = next(c for c in app.checkbox if "Judge on Nebius" in c.label)
+    assert not judge_box.disabled

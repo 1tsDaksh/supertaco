@@ -51,6 +51,21 @@ _TOKEN_FACTORY_BASE_URL = os.getenv(
 )
 
 
+def _showcase_enabled() -> bool:
+    """SUPERTACO_SHOWCASE from the env, else st.secrets (Community Cloud has no env UI)."""
+    raw = os.getenv("SUPERTACO_SHOWCASE")
+    if raw is None:
+        try:
+            raw = st.secrets["SUPERTACO_SHOWCASE"]
+        except Exception:
+            raw = None
+    return str(raw or "").strip().lower() in {"1", "true", "yes"}
+
+
+# Showcase mode: training disabled on the hosted demo; planning stays live.
+_SHOWCASE = _showcase_enabled()
+
+
 def get_settings():
     """Return a settings namespace with the same fields as SuperTacoSettings."""
 
@@ -581,6 +596,11 @@ def main():
         "Type a goal → Nemotron plans config, data and eval prompts → you review → "
         "free Colab T4 → self-healing loop → Nemotron judge before/after"
     )
+    if _SHOWCASE:
+        st.info(
+            "🧪 **Showcase mode** — live training is disabled on this deployment; "
+            "browse recorded runs below. Planning is live."
+        )
     render_goal_panel()
     render_sidebar()
 
@@ -623,13 +643,17 @@ def main():
             "Judge on Nebius AI Cloud (serverless job)",
             value=True,
             key="judge_on_nebius",
+            disabled=_SHOWCASE,
             help=(
                 "Runs the Nemotron eval as a Nebius Serverless Job; falls back "
                 "to direct Token Factory judging on infra failure."
             ),
         )
         run_clicked = st.button(
-            "🚀 Fine-tune on Colab (supervisor loop)", type="primary", use_container_width=True
+            "🚀 Fine-tune on Colab (supervisor loop)",
+            type="primary",
+            use_container_width=True,
+            disabled=_SHOWCASE,
         )
 
         feedback_clicked = False
@@ -640,7 +664,9 @@ def main():
                 height=68,
                 placeholder='e.g. "be more concise", "pirate voice too subtle"',
             )
-            feedback_clicked = st.button("🔁 Re-run with feedback", use_container_width=True)
+            feedback_clicked = st.button(
+                "🔁 Re-run with feedback", use_container_width=True, disabled=_SHOWCASE
+            )
         if feedback_clicked:
             goal = (st.session_state.get("plan_goal") or "").strip()
             if not feedback.strip():
