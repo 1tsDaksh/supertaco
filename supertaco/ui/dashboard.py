@@ -50,6 +50,8 @@ _load_env()
 # reach supertaco.settings (env name NEBIUS_API_KEY). Rebuild the settings singleton only
 # when a key was actually injected; make_llm()/judge read it at call time, and local runs
 # (no secrets) keep the original instance so the offline test seam stays intact.
+# NOTE: tests must snapshot supertaco.settings.settings (conftest does) before running
+# with st.secrets keys — this assignment bypasses monkeypatch's undo.
 if inject_secrets(st.secrets):
     import supertaco.settings as _settings_mod
 
