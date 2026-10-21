@@ -115,6 +115,8 @@ def plan_goal(goal: str, run_id: str) -> Path | None:
     if match is None:
         print(f"[{run_id}] plan produced no path: {out.strip()}", file=sys.stderr)
         return None
+    line = next((ln.strip() for ln in out.splitlines() if PLAN_RE.search(ln)), match.group(0))
+    print(f"[{run_id}] {line}")  # echo mode=... so a fallback planner is visible
     return Path(match.group(1))
 
 
@@ -201,8 +203,10 @@ def render_report(artifacts: list[dict], goals: list[str]) -> str:
         f"**runs recorded:** {len(ordered)} - **successful:** {success_count}",
         "",
         "**How to verify:** every row cites its `run_id` - "
-        '`grep -c \'"run_id":"<run_id>"\' logs/llm_calls.jsonl` counts that run\'s audit '
-        "lines, and `logs/runs/<run_id>.json` holds its full artifact (schema v1).",
+        '`grep -c \'"run_id": "<run_id>"\' logs/llm_calls.jsonl` counts that run\'s audit '
+        "lines (plan-phase calls share the id, so the count is >= the artifact's "
+        "`llm_calls` length and > 0), and `logs/runs/<run_id>.json` holds its full "
+        "artifact (schema v1).",
         "",
         "| run_id | goal | model | attempts | healed | base avg | ft avg | delta |"
         " judge | tokens | wall-clock |",

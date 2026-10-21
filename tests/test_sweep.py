@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -155,6 +156,10 @@ def test_plans_only_never_launches_training(tmp_path, monkeypatch, capsys):
     assert rc == 0
     assert len(calls) == 2
     assert all("run" not in c for c in calls)
+    out = capsys.readouterr().out
+    for goal in goals:
+        assert f"[{sweep.run_id_for(goal)}]" in out
+    assert "mode=fallback" in out  # degraded planner must be visible, not just N/N
 
 
 def test_corrupt_artifact_counts_as_pending(tmp_path, monkeypatch):
@@ -178,3 +183,15 @@ def test_corrupt_artifact_counts_as_pending(tmp_path, monkeypatch):
     rc = sweep.main([])
     assert rc == 0
     assert len(calls) == 2  # plan + run: corrupt artifact did NOT crash the scan
+
+
+def test_verify_grep_pattern_matches_writer_format():
+    sweep = _load_sweep()
+    rid = sweep.run_id_for("goal one")
+    report = sweep.render_report([_artifact(rid, "goal one")], ["goal one", "goal two"])
+    match = re.search(r"grep -c '([^']+)' logs/llm_calls\.jsonl", report)
+    assert match, "verify command missing from header"
+    pattern = match.group(1)
+    # writers emit json.dumps(entry) default separators: "run_id": "<id>" with a space
+    line = json.dumps({"model_key": "classify", "run_id": rid, "tokens": 1})
+    assert re.search(pattern.replace("<run_id>", rid), line), "pattern must match writer JSON"

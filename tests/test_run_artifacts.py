@@ -162,3 +162,34 @@ def test_wrapper_resolves_run_id_from_env(tmp_path, monkeypatch):
     assert path.exists(), f"missing artifact {path}"
     art = json.loads(path.read_text(encoding="utf-8"))
     assert art["run_id"] == "envart99"
+
+
+def test_success_path_receipt_failure_never_fails_run(tmp_path, monkeypatch):
+    import supertaco.runlog as runlog
+
+    def _boom(run_id, data):
+        raise RuntimeError("receipt exploded")
+
+    monkeypatch.setattr(runlog, "write_run_artifact", _boom)
+    with pytest.warns(UserWarning, match="run artifact write failed"):
+        result = run_training_loop(
+            dict(CFG), transport=FakeTransport(), llm=FakeLLM(), run_id="artreceipt"
+        )
+    assert result.success is True  # receipt failure must never fail a successful run
+
+
+def test_crash_path_receipt_failure_still_raises_primary(tmp_path, monkeypatch):
+    import supertaco.runlog as runlog
+
+    def _boom(run_id, data):
+        raise RuntimeError("receipt exploded")
+
+    monkeypatch.setattr(runlog, "write_run_artifact", _boom)
+
+    class BoomLLM(FakeLLM):
+        def classify_failure(self, logs):
+            raise RuntimeError("boom")
+
+    transport = FakeTransport(logs="step 4 loss NaN\ntraining finished\n", error="CUDA exploded")
+    with pytest.raises(RuntimeError, match="boom"):
+        run_training_loop(dict(CFG), transport=transport, llm=BoomLLM(), run_id="artmask01")

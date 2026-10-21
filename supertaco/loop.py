@@ -219,19 +219,22 @@ def run_training_loop(
         raise
     finally:
         reset_run_id(token)
-    write_run_artifact(
-        rid,
-        _build_artifact(
-            run_id=rid,
-            goal=goal,
-            config_path=config_path,
-            started_wall=started_wall,
-            events=collected,
-            result=result,
-            error=result.error,
-            llm_calls=list(result.llm_calls),
-        ),
-    )
+    try:
+        write_run_artifact(
+            rid,
+            _build_artifact(
+                run_id=rid,
+                goal=goal,
+                config_path=config_path,
+                started_wall=started_wall,
+                events=collected,
+                result=result,
+                error=result.error,
+                llm_calls=list(result.llm_calls),
+            ),
+        )
+    except Exception as build_exc:  # receipt failure must never fail a successful run
+        warnings.warn(f"run artifact write failed: {build_exc}", stacklevel=2)
     return result
 
 
