@@ -1168,7 +1168,14 @@ def test_showcase_loader_skips_corrupt_and_non_run_files(tmp_path, offline, monk
     (runs / "x.timing.json").write_text(json.dumps({"pair_s": 1.5}), encoding="utf-8")
     drift = {**_SHOWCASE_ARTIFACT, "goal": "drifted goal", "eval": {"delta": 1.0}}
     (runs / "drift.json").write_text(
-        json.dumps({**drift, "events": [42, {"data": {"attempts": 1}}]}), encoding="utf-8"
+        json.dumps(
+            {
+                **drift,
+                "events": [42, {"data": {"attempts": 1}}],
+                "llm_calls": [42, *drift["llm_calls"]],
+            }
+        ),
+        encoding="utf-8",
     )
     (runs / "one.json").write_text(json.dumps(_SHOWCASE_ARTIFACT), encoding="utf-8")
     monkeypatch.setenv("SUPERTACO_SHOWCASE", "1")

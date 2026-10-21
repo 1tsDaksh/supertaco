@@ -546,6 +546,7 @@ def _llm_rows(calls: list) -> list:
             "error": (c.get("error") or "")[:60],
         }
         for c in calls
+        if isinstance(c, dict)
     ]
 
 

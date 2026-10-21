@@ -1,0 +1,4 @@
+# Streamlit Community Cloud installs this file (it does not read pyproject.toml).
+# `-e .` installs the supertaco package plus exactly its runtime dependencies from
+# pyproject.toml — single source of truth, no mirrored list to drift.
+-e .
