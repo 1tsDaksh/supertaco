@@ -1102,3 +1102,60 @@ def test_showcase_malformed_secrets_file_fails_loud(monkeypatch, tmp_path):
     monkeypatch.setattr(st.secrets, "_secrets", None)
     with pytest.raises(StreamlitSecretNotFoundError):
         dash._showcase_enabled()
+
+
+_SHOWCASE_ARTIFACT = {
+    "schema": 1,
+    "run_id": "swabcd",
+    "goal": "pirate chef sweep goal",
+    "config_path": "configs/runs/plan_demo.yaml",
+    "started": "2026-10-20T12:00:00+00:00",
+    "finished": "2026-10-20T12:10:00+00:00",
+    "wall_clock_s": 600.0,
+    "success": True,
+    "attempts": 2,
+    "failure_keys": ["OOM"],
+    "healed": True,
+    "final_config": "configs/runs/x_OOM_patched.yaml",
+    "judge_backend": "nebius_job",
+    "eval": {
+        "prompts": ["p1"],
+        "base_scores": [5.0],
+        "fine_tuned_scores": [9.0],
+        "base_avg": 5.0,
+        "ft_avg": 9.0,
+        "delta": 4.0,
+        "modes": ["base:real / ft:real"],
+        "regression_flagged": False,
+    },
+    "events": [{"type": "run_succeeded", "data": {"attempts": 2}}],
+    "attempt_ledger": [],
+    "llm_calls": [
+        {
+            "model_key": "patch",
+            "model_id": "m",
+            "mode": "real",
+            "tokens": 10,
+            "latency": 0.1,
+            "error": None,
+            "run_id": "swabcd",
+        }
+    ],
+    "error": None,
+}
+
+
+def test_showcase_renders_recorded_run_from_env_dir(tmp_path, offline, monkeypatch):
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / "one.json").write_text(json.dumps(_SHOWCASE_ARTIFACT), encoding="utf-8")
+    monkeypatch.setenv("SUPERTACO_SHOWCASE", "1")
+    monkeypatch.setenv("SUPERTACO_EXAMPLES_RUNS", str(runs))
+    at = AppTest.from_file(str(DASHBOARD), default_timeout=60)
+    at.run()
+    assert not at.exception, f"showcase render crashed: {[e.value for e in at.exception]}"
+    headings = [m.value for m in at.markdown]
+    assert any("pirate chef sweep goal" in h for h in headings)
+    delta = next(m for m in at.metric if m.label == "Judge delta")
+    assert delta.value == "+4.00"
+    assert any("Nebius" in s.value for s in at.success)

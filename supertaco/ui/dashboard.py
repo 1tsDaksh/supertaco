@@ -7,8 +7,10 @@ Reads settings directly from .env file without requiring package installation.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict
 
 import plotly.graph_objects as go  # type: ignore[import-untyped]  # plotly ships no stubs
@@ -350,60 +352,7 @@ def render_report() -> None:
     if not results:
         st.caption("No judge evaluation — the run never reached a healthy attempt.")
     else:
-        base_avg = sum(results["base_scores"]) / len(results["base_scores"])
-        ft_avg = sum(results["fine_tuned_scores"]) / len(results["fine_tuned_scores"])
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Judge: base", f"{base_avg:.2f}")
-        col2.metric("Judge: fine-tuned", f"{ft_avg:.2f}")
-        col3.metric("Improvement", f"{ft_avg - base_avg:+.2f}")
-        prev = st.session_state.get("prev_run_result")
-        prev_eval = prev.eval_results if prev else None
-        prev_scores = (prev_eval or {}).get("fine_tuned_scores") or []
-        prev_modes = (prev_eval or {}).get("modes") or []
-        if (
-            prev_scores
-            and results["fine_tuned_scores"]
-            and all("hash" not in m and "fallback" not in m for m in results["modes"])
-            and all("hash" not in m and "fallback" not in m for m in prev_modes)
-        ):
-            prev_ft = sum(prev_scores) / len(prev_scores)
-            st.caption(
-                f"Before feedback: fine-tuned avg {prev_ft:.2f} -> after: {ft_avg:.2f} "
-                f"({ft_avg - prev_ft:+.2f})"
-            )
-        if results["regression_flagged"]:
-            st.error("🚨 EVAL REGRESSION: fine-tuned is >10% below baseline.")
-        else:
-            st.caption("✅ Regression check passed (fine-tuned ≥ 90% of base).")
-        backend = results.get("judge_backend", "direct")
-        if backend == "nebius_job":
-            st.success("✓ Judged on Nebius AI Cloud — eval ran as a serverless job")
-        elif backend == "direct_fallback":
-            st.warning("⚠ Nebius judge unavailable — fell back to direct Token Factory judging")
-        modes = results["modes"]
-        if any("fallback" in m for m in modes):
-            st.warning(
-                "⚠ Judge HTTP failure (transport/circuit) — affected scores did not "
-                "come from a live Nemotron reply."
-            )
-        if any("hash" in m for m in modes):
-            st.warning(
-                "⚠ Judge reply unparseable after retry — affected scores are "
-                "deterministic hash placeholders."
-            )
-            st.caption(
-                "† hash-mode score — deterministic placeholder (no parseable Nemotron reply)."
-            )
-        st.dataframe(
-            {
-                "prompt": results["prompts"],
-                "base": results["base_scores"],
-                "fine_tuned": results["fine_tuned_scores"],
-                "judge": [f"{m} †" if "hash" in m else m for m in modes],
-            },
-            use_container_width=True,
-            hide_index=True,
-        )
+        _render_eval_summary(results)
 
     if result.success:
         st.markdown("**Final config**")
@@ -498,6 +447,62 @@ def _render_timeline(slot, events: list) -> None:
         )
 
 
+def _render_eval_summary(results: dict) -> None:
+    """Judge metrics, regression/backend/mode warnings, and the per-prompt table."""
+    base_avg = sum(results["base_scores"]) / len(results["base_scores"])
+    ft_avg = sum(results["fine_tuned_scores"]) / len(results["fine_tuned_scores"])
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Judge: base", f"{base_avg:.2f}")
+    col2.metric("Judge: fine-tuned", f"{ft_avg:.2f}")
+    col3.metric("Improvement", f"{ft_avg - base_avg:+.2f}")
+    prev = st.session_state.get("prev_run_result")
+    prev_eval = prev.eval_results if prev else None
+    prev_scores = (prev_eval or {}).get("fine_tuned_scores") or []
+    prev_modes = (prev_eval or {}).get("modes") or []
+    if (
+        prev_scores
+        and results["fine_tuned_scores"]
+        and all("hash" not in m and "fallback" not in m for m in results["modes"])
+        and all("hash" not in m and "fallback" not in m for m in prev_modes)
+    ):
+        prev_ft = sum(prev_scores) / len(prev_scores)
+        st.caption(
+            f"Before feedback: fine-tuned avg {prev_ft:.2f} -> after: {ft_avg:.2f} "
+            f"({ft_avg - prev_ft:+.2f})"
+        )
+    if results["regression_flagged"]:
+        st.error("🚨 EVAL REGRESSION: fine-tuned is >10% below baseline.")
+    else:
+        st.caption("✅ Regression check passed (fine-tuned ≥ 90% of base).")
+    backend = results.get("judge_backend", "direct")
+    if backend == "nebius_job":
+        st.success("✓ Judged on Nebius AI Cloud — eval ran as a serverless job")
+    elif backend == "direct_fallback":
+        st.warning("⚠ Nebius judge unavailable — fell back to direct Token Factory judging")
+    modes = results["modes"]
+    if any("fallback" in m for m in modes):
+        st.warning(
+            "⚠ Judge HTTP failure (transport/circuit) — affected scores did not "
+            "come from a live Nemotron reply."
+        )
+    if any("hash" in m for m in modes):
+        st.warning(
+            "⚠ Judge reply unparseable after retry — affected scores are "
+            "deterministic hash placeholders."
+        )
+        st.caption("† hash-mode score — deterministic placeholder (no parseable Nemotron reply).")
+    st.dataframe(
+        {
+            "prompt": results["prompts"],
+            "base": results["base_scores"],
+            "fine_tuned": results["fine_tuned_scores"],
+            "judge": [f"{m} †" if "hash" in m else m for m in modes],
+        },
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
 def _loss_figure(events: list):
     """Per-attempt loss series parsed from generated logs (spec 5.5)."""
     import math
@@ -530,6 +535,52 @@ def _llm_rows(calls: list) -> list:
         }
         for c in calls
     ]
+
+
+def _load_showcase_runs() -> list[dict]:
+    """Committed schema-v1 artifacts from examples/runs (SUPERTACO_EXAMPLES_RUNS overrides)."""
+    override = os.getenv("SUPERTACO_EXAMPLES_RUNS")
+    if override:
+        runs_dir = Path(override)
+    else:
+        runs_dir = Path(__file__).resolve().parents[2] / "examples" / "runs"
+    artifacts = []
+    for path in sorted(runs_dir.glob("*.json")):
+        artifacts.append(json.loads(path.read_text(encoding="utf-8")))
+    return artifacts
+
+
+def render_showcase_runs() -> None:
+    """Browse recorded sweep artifacts: metrics, judge summary, timeline (WS5)."""
+    artifacts = _load_showcase_runs()
+    if not artifacts:
+        st.caption("No recorded runs shipped with this deployment.")
+        return
+    for data in artifacts:
+        ev = data.get("eval") or {}
+        title = data.get("goal") or data.get("run_id", "recorded run")
+        with st.container(border=True):
+            st.markdown(f"#### 📁 {title}")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Run", str(data.get("run_id", "?")))
+            m2.metric("Attempts", data.get("attempts", 0))
+            m3.metric("Healed", "yes" if data.get("healed") else "no")
+            m4.metric(
+                "Judge delta",
+                f"{ev['delta']:+.2f}" if isinstance(ev.get("delta"), (int, float)) else "—",
+            )
+            if ev:
+                _render_eval_summary({**ev, "judge_backend": data.get("judge_backend") or "direct"})
+            events = [
+                SimpleNamespace(type=e["type"], data=e["data"]) for e in data.get("events", [])
+            ]
+            st.markdown(_render_events(events))
+            with st.expander("🧠 LLM calls"):
+                st.dataframe(
+                    _llm_rows(data.get("llm_calls") or []),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
 
 def execute_launch(
@@ -799,6 +850,8 @@ def main():
     # ── Bottom Row: Training report ────────────────────────────────
     st.markdown("---")
     render_report()
+    if _SHOWCASE:
+        render_showcase_runs()
 
 
 if __name__ == "__main__":
