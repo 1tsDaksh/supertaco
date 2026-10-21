@@ -155,3 +155,26 @@ def test_plans_only_never_launches_training(tmp_path, monkeypatch, capsys):
     assert rc == 0
     assert len(calls) == 2
     assert all("run" not in c for c in calls)
+
+
+def test_corrupt_artifact_counts_as_pending(tmp_path, monkeypatch):
+    sweep = _load_sweep()
+    goals = ["fresh goal"]
+    _wire(tmp_path, monkeypatch, sweep, goals)
+    rid = sweep.run_id_for("fresh goal")
+    (tmp_path / "logs" / "runs" / f"{rid}.json").write_text("{truncated", encoding="utf-8")
+    calls = []
+
+    class _Proc:
+        returncode = 0
+        stdout = "Plan written: configs/runs/plan_x.yaml (mode=fallback, dataset=synthetic)\n"
+        stderr = ""
+
+    def fake_run(argv, run_id):
+        calls.append(list(argv))
+        return _Proc()
+
+    monkeypatch.setattr(sweep, "_run", fake_run)
+    rc = sweep.main([])
+    assert rc == 0
+    assert len(calls) == 2  # plan + run: corrupt artifact did NOT crash the scan

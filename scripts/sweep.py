@@ -35,7 +35,10 @@ PLAN_RE = re.compile(r"Plan written: (\S+)")
 def load_goals() -> list[str]:
     """Read the sweep goal texts; the list order is the report order."""
     data = json.loads(GOALS_PATH.read_text(encoding="utf-8"))
-    return [entry["goal"] for entry in data]
+    goals = [entry["goal"] for entry in data]
+    ids = [run_id_for(g) for g in goals]
+    assert len(set(ids)) == len(goals), "duplicate run_id in goals.json"
+    return goals
 
 
 def run_id_for(goal: str) -> str:
@@ -49,11 +52,15 @@ def artifact_path(run_id: str) -> Path:
 
 
 def load_artifact(run_id: str) -> dict | None:
-    """Read one run artifact, or None when it does not exist yet."""
+    """Read one run artifact; missing OR corrupt counts as not-yet-run (re-run)."""
     path = artifact_path(run_id)
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"[{run_id}] artifact unreadable ({exc}); will re-run", file=sys.stderr)
+        return None
 
 
 def _write_timing(run_id: str, pair_start: float) -> None:
@@ -69,7 +76,14 @@ def _with_timing(artifacts: list[dict]) -> list[dict]:
         run_id = artifact.get("run_id")
         path = ARTIFACT_DIR / f"{run_id}.timing.json"
         if run_id and path.exists():
-            timing = json.loads(path.read_text(encoding="utf-8"))
+            try:
+                timing = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                print(
+                    f"[{run_id}] timing unreadable ({exc}); using artifact wall_clock_s",
+                    file=sys.stderr,
+                )
+                continue
             if isinstance(timing.get("pair_s"), (int, float)):
                 artifact["runner_wall_clock_s"] = timing["pair_s"]
     return artifacts
@@ -77,7 +91,7 @@ def _with_timing(artifacts: list[dict]) -> list[dict]:
 
 def _run(argv: list[str], run_id: str) -> subprocess.CompletedProcess:
     """Run one CLI subprocess with SUPERTACO_RUN_ID exported (monkeypatch seam)."""
-    env = dict(os.environ, SUPERTACO_RUN_ID=run_id)
+    env = dict(os.environ, SUPERTACO_RUN_ID=run_id, PYTHONUTF8="1")
     return subprocess.run(
         argv,
         env=env,

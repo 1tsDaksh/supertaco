@@ -57,11 +57,13 @@ def write_run_artifact(run_id: str, data: dict[str, Any]) -> Path:
     the audit writer's behavior.
     """
     path = _logs_dir() / "runs" / f"{run_id}.json"
+    tmp = path.with_suffix(".json.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
+        with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(data, fh, ensure_ascii=False, indent=2, default=str)
             fh.write("\n")
+        os.replace(tmp, path)
     except OSError as exc:
         warnings.warn(f"run artifact write failed: {exc}", stacklevel=2)
     return path
