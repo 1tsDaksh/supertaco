@@ -546,7 +546,14 @@ def _load_showcase_runs() -> list[dict]:
         runs_dir = Path(__file__).resolve().parents[2] / "examples" / "runs"
     artifacts = []
     for path in sorted(runs_dir.glob("*.json")):
-        artifacts.append(json.loads(path.read_text(encoding="utf-8")))
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            st.warning(f"Skipped unreadable recorded run `{path.name}`: {exc}")
+            continue
+        if not isinstance(data, dict) or data.get("schema") != 1:
+            continue  # non-run files (e.g. *.timing.json) are not recordings
+        artifacts.append(data)
     return artifacts
 
 
@@ -569,10 +576,12 @@ def render_showcase_runs() -> None:
                 "Judge delta",
                 f"{ev['delta']:+.2f}" if isinstance(ev.get("delta"), (int, float)) else "—",
             )
-            if ev:
+            if ev and "base_scores" in ev and "modes" in ev:
                 _render_eval_summary({**ev, "judge_backend": data.get("judge_backend") or "direct"})
             events = [
-                SimpleNamespace(type=e["type"], data=e["data"]) for e in data.get("events", [])
+                SimpleNamespace(type=e.get("type", "?"), data=e.get("data") or {})
+                for e in data.get("events", [])
+                if isinstance(e, dict)
             ]
             st.markdown(_render_events(events))
             with st.expander("🧠 LLM calls"):

@@ -1159,3 +1159,35 @@ def test_showcase_renders_recorded_run_from_env_dir(tmp_path, offline, monkeypat
     delta = next(m for m in at.metric if m.label == "Judge delta")
     assert delta.value == "+4.00"
     assert any("Nebius" in s.value for s in at.success)
+
+
+def test_showcase_loader_skips_corrupt_and_non_run_files(tmp_path, offline, monkeypatch):
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (runs / "bad.json").write_text("{not json", encoding="utf-8")
+    (runs / "x.timing.json").write_text(json.dumps({"pair_s": 1.5}), encoding="utf-8")
+    drift = {**_SHOWCASE_ARTIFACT, "goal": "drifted goal", "eval": {"delta": 1.0}}
+    (runs / "drift.json").write_text(
+        json.dumps({**drift, "events": [42, {"data": {"attempts": 1}}]}), encoding="utf-8"
+    )
+    (runs / "one.json").write_text(json.dumps(_SHOWCASE_ARTIFACT), encoding="utf-8")
+    monkeypatch.setenv("SUPERTACO_SHOWCASE", "1")
+    monkeypatch.setenv("SUPERTACO_EXAMPLES_RUNS", str(runs))
+    at = AppTest.from_file(str(DASHBOARD), default_timeout=60)
+    at.run()
+    assert not at.exception, f"robustness render crashed: {[e.value for e in at.exception]}"
+    headings = [m.value for m in at.markdown]
+    assert any("pirate chef sweep goal" in h for h in headings)  # valid artifact still renders
+    assert any("drifted goal" in h for h in headings)  # schema-1 card renders, eval skipped
+    assert not any(h.strip() == "#### 📁 recorded run" for h in headings)  # timing junk no card
+    assert not any("bad.json" in h for h in headings)  # corrupt file never becomes a card
+    assert any("Skipped unreadable recorded run" in w.value for w in at.warning)
+
+
+def test_showcase_empty_examples_dir_shows_caption(tmp_path, offline, monkeypatch):
+    monkeypatch.setenv("SUPERTACO_SHOWCASE", "1")
+    monkeypatch.setenv("SUPERTACO_EXAMPLES_RUNS", str(tmp_path / "missing"))
+    at = AppTest.from_file(str(DASHBOARD), default_timeout=60)
+    at.run()
+    assert not at.exception, f"render crashed: {[e.value for e in at.exception]}"
+    assert any("No recorded runs shipped" in c.value for c in at.caption)
