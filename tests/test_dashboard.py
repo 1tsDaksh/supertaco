@@ -629,6 +629,45 @@ def test_wizard_back_buttons_walk_the_steps(app, monkeypatch):
     assert any("model learn" in ta.label for ta in app.text_area)
 
 
+def test_crash_still_lands_on_report_with_error(app, monkeypatch):
+    """A run that raises must not strand the user on a dead monitor."""
+    import supertaco.loop as loop_mod
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("colab-cli session died mid-run")
+
+    monkeypatch.setattr(loop_mod, "run_training_loop", boom)
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    assert app.session_state["live_step"] == 4  # advanced despite the crash
+    errors = "\n".join(e.value for e in app.error)
+    assert "colab-cli session died mid-run" in errors
+    assert app.session_state["run_error"] is not None
+
+
+def test_report_replays_terminal_history(app, monkeypatch):
+    _patch_run(monkeypatch, StreamingFakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    _launch(app)
+    assert not app.exception, [e.value for e in app.exception]
+    assert app.session_state["live_step"] == 4
+    assert any("🖥️ Run log" in m.value for m in app.markdown)
+    try:
+        lines = app.session_state["term_lines"]
+    except KeyError:
+        lines = []
+    assert any("training finished" in line for line in lines)
+
+
+def test_monitor_offers_view_report_when_run_finished(app, monkeypatch):
+    """Escape hatch: a finished run sitting on the monitor can jump to the report."""
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    _launch(app)  # lands on step 4 via auto-advance
+    _goto_step(app, 3)  # simulate a stuck/returned monitor with a finished run
+    btn = next(b for b in app.button if "View report" in b.label)
+    btn.click().run()
+    assert app.session_state["live_step"] == 4
+
+
 def _seed_plan_keys(app):
     app.session_state["plan_goal"] = "pirate chef"
     app.session_state["plan_dataset"] = {

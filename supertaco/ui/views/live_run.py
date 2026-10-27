@@ -335,6 +335,7 @@ def _build_launch_request(cfg_for_run: dict, showcase: bool, *, manual: bool = T
     if manual:
         st.session_state["prev_run_result"] = None  # manual launch invalidates the baseline
     st.session_state["run_result"] = None  # never trust a stale result
+    st.session_state["run_error"] = None  # a new attempt clears the previous crash banner
     st.session_state["llm_calls"] = []  # stale calls must not outlive a failed run
     st.session_state["eval_results"] = None  # stale eval must not score a newer run
     st.session_state["events"] = []  # stale timeline must not outlive a failed run
@@ -447,14 +448,17 @@ def _render_step_monitor(showcase: bool) -> None:
                     st.error(f"🛑 {result.error}")
                 else:
                     st.toast("✅ Run complete", icon="✅")
-                st.session_state["live_step"] = 4
-                st.rerun()
             except ConfigurationError as exc:
-                st.error(f"❌ {exc}")
+                st.session_state["run_error"] = f"❌ {exc}"
                 report.render_timeline(timeline_slot, st.session_state.get("events", []))
             except Exception as exc:  # spec 6: never a Streamlit traceback
-                st.error(f"❌ Run crashed: {exc}")
+                st.session_state["run_error"] = f"❌ Run crashed: {exc}"
                 report.render_timeline(timeline_slot, st.session_state.get("events", []))
+            finally:
+                # Whatever happened — success, judge failure or crash — the run is
+                # over and the user must land on the report, never a dead monitor.
+                st.session_state["live_step"] = 4
+                st.rerun()
         elif st.session_state.get("events"):
             report.render_timeline(timeline_slot, st.session_state["events"])
             latest_logs = next(
@@ -467,6 +471,8 @@ def _render_step_monitor(showcase: bool) -> None:
             )
             term_slot.html(components.build_terminal_html(latest_logs.splitlines() or ["—"]))
             chart_slot.plotly_chart(_loss_figure(st.session_state["events"]), width="stretch")
+            if st.session_state.get("run_result") is not None and st.button("View report →"):
+                _goto(4)
         else:
             timeline_slot.info("Nothing to monitor yet — launch a run from the review step.")
 
@@ -497,6 +503,19 @@ def _render_step_report(showcase: bool) -> None:
     events = st.session_state.get("events") or []
     if events:
         report.render_timeline(st.empty(), events)
+
+    run_error = st.session_state.get("run_error")
+    if run_error and st.session_state.get("run_result") is None:
+        st.error(run_error)  # the run crashed before producing a result
+
+    # Full terminal history replays here too, so the evidence travels with the report.
+    try:
+        term_lines = st.session_state["term_lines"]
+    except KeyError:
+        term_lines = []
+    if term_lines:
+        st.markdown("##### 🖥️ Run log")
+        components.render_terminal(term_lines)
 
     report.render_report()
 
