@@ -9,6 +9,7 @@ from streamlit.testing.v1 import AppTest
 
 from supertaco.ui import components, theme
 from supertaco.ui import data as data_mod
+from supertaco.ui.views import landing
 
 REPO = Path(__file__).resolve().parents[1]
 DASHBOARD = REPO / "supertaco" / "ui" / "dashboard.py"
@@ -172,8 +173,28 @@ def at_app(offline, monkeypatch):
 def test_landing_renders_hero_ctas_and_empty_state(at_app):
     assert any("▶️ Run a demo" == b.label for b in at_app.button)
     assert any("📊 See latest results" == b.label for b in at_app.button)
-    assert any("How it works" in m.value for m in at_app.markdown)
+    md = "\n".join(m.value for m in at_app.markdown)
+    assert "How it works" in md  # six-stage pipeline section
+    assert "What it can do" in md  # capabilities grid
+    assert "Under the hood" in md  # stack facts
     assert any("No run artifacts found yet" in i.value for i in at_app.info)
+
+
+def test_landing_content_is_informative_not_just_navigation():
+    hero = landing._hero_html()
+    assert "fine-tuning sandbox" in hero  # the pitch lives on the page itself
+    assert len(landing._PIPELINE) == 6  # plan → materialize → train → heal → judge → receipt
+    assert len(landing._CAPABILITIES) == 6
+    stages = {stage for stage, _ in landing._PIPELINE}
+    assert {"1 · Plan", "4 · Heal", "6 · Receipt"} <= stages
+    for title, body in landing._CAPABILITIES:
+        assert len(body) > 60  # each capability actually explains itself
+    stack = landing._stack_table_html()
+    assert "Nebius" in stack and "Colab T4" in stack and "Schema-v1" in stack
+    card = landing._card_html("1 · Plan", "x" * 200, body_html=False)
+    assert "&" not in card  # bodies are escaped by default
+    raw = landing._card_html("1 · Plan", "<strong>real</strong>", body_html=True)
+    assert "<strong>real</strong>" in raw
 
 
 def test_landing_run_demo_button_navigates(at_app):
