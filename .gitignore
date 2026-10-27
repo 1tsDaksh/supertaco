@@ -15,6 +15,7 @@ venv/
 .pytest_cache/
 .ruff_cache/
 .streamlit/
+.superpowers/
 
 # Shell-redirect junk (accidental `2>$` / device-name artifacts)
 /$

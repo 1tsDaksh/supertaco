@@ -117,6 +117,16 @@ def app(offline, monkeypatch):
     at.session_state["judge_on_nebius"] = False
     at.run()
     assert not at.exception, f"initial render crashed: {[e.value for e in at.exception]}"
+    at.session_state["nav_page"] = "🛰️ Live Run"
+    at.run()
+    assert not at.exception, f"live run page crashed: {[e.value for e in at.exception]}"
+    return at
+
+
+def _goto_live(at):
+    """Navigate the routed app to the Live Run page."""
+    at.session_state["nav_page"] = "🛰️ Live Run"
+    at.run()
     return at
 
 
@@ -177,11 +187,11 @@ def test_default_config_helper_returns_empty_on_read_error(monkeypatch):
     assert dash._default_config() == {}
 
 
-def test_sidebar_shows_tavily_status_caption(app):
+def test_setup_panel_shows_tavily_status_caption(app):
     import supertaco.ui.dashboard as dash
     from supertaco.ui.dashboard import _mask_key
 
-    caps = [c.value for c in app.sidebar.caption]
+    caps = [c.value for c in app.caption]
     status = next(c for c in caps if c.startswith("🔎 Tavily citations:"))
     key = dash._TAVILY_API_KEY
     if key:
@@ -195,8 +205,8 @@ def test_sidebar_shows_tavily_status_caption(app):
     assert _mask_key("tvly-abcdefghijkl") == "tvly-****ijkl"
 
 
-def test_sidebar_omits_api_key_block(app):
-    texts = [m.value for m in app.sidebar.markdown] + [c.value for c in app.sidebar.caption]
+def test_setup_panel_omits_api_key_block(app):
+    texts = [m.value for m in app.markdown] + [c.value for c in app.caption]
     assert not any("API Keys" in t for t in texts)
     assert not any("NEBIUS_PROJECT_ID" in t for t in texts)
 
@@ -208,9 +218,9 @@ def test_hash_judge_alert_says_unparseable_not_llm_unavailable(app, monkeypatch)
     warnings_text = "\n".join(w.value for w in app.warning)
     assert "unparseable" in warnings_text
     assert "LLM unavailable" not in warnings_text
-    # the call itself was real — sidebar and report must not contradict each other
-    app.run()  # sidebar renders before the run in a pass; re-render to see its calls
-    assert any("real call" in s.value for s in app.sidebar.success)
+    # the call itself was real — setup panel and report must not contradict each other
+    app.run()  # panel renders before the run in a pass; re-render to see its calls
+    assert any("real call" in s.value for s in app.success)
     judge_df = next(df for df in app.dataframe if "judge" in df.value.columns)
     assert all("†" in str(m) for m in judge_df.value["judge"])
     assert any("†" in c.value for c in app.caption)
@@ -400,7 +410,14 @@ def test_live_streaming_survives_multiple_loss_lines(app, monkeypatch):
     assert not app.exception, [e.value for e in app.exception]
     result = app.session_state["run_result"]
     assert result.success is True, result.error  # would be False with the duplicate-key bug
-    assert any("training finished" in c.value for c in app.code)  # streamed logs landed
+    # streamed lines land in the auto-scroll terminal mirror (full history, pinned)
+    try:
+        lines = app.session_state["term_lines"]
+    except KeyError:
+        lines = []
+    term = "\n".join(lines)
+    assert "step 4 loss 1.9218" in term
+    assert "training finished" in term
 
 
 def test_knobs_overlay_config_yaml(app, monkeypatch):
@@ -661,7 +678,7 @@ def test_feedback_button_revises_and_reruns(app, monkeypatch):
     seen = _patch_feedback(monkeypatch)
     app.run()  # feedback box appears now that a run finished
 
-    next(sb for sb in app.sidebar.selectbox if sb.label == "model").set_value("tinyllama-1.1b")
+    next(sb for sb in app.selectbox if sb.label == "model").set_value("tinyllama-1.1b")
     fb = next(ta for ta in app.text_area if ta.label == "Feedback on the result")
     fb.set_value("be more concise")
     next(b for b in app.button if "Re-run with feedback" in b.label).click().run()
@@ -1034,7 +1051,7 @@ def test_execute_launch_passes_plan_goal_to_loop(offline, monkeypatch):
     monkeypatch.setattr(loop_mod, "run_training_loop", fake_loop)
     at = AppTest.from_file(str(DASHBOARD), default_timeout=60)
     at.session_state["plan_goal"] = "pirate chef"
-    at.run()
+    _goto_live(at)
     assert not at.exception, f"render crashed: {[e.value for e in at.exception]}"
     run_btn = next(b for b in at.button if "Fine-tune on Colab" in b.label)
     run_btn.click()
@@ -1046,7 +1063,7 @@ def test_execute_launch_passes_plan_goal_to_loop(offline, monkeypatch):
 def test_showcase_banner_and_disabled_controls(offline, monkeypatch):
     monkeypatch.setenv("SUPERTACO_SHOWCASE", "1")
     at = AppTest.from_file(str(DASHBOARD), default_timeout=60)
-    at.run()
+    _goto_live(at)
     assert not at.exception, f"showcase render crashed: {[e.value for e in at.exception]}"
     assert any("Showcase mode" in i.value for i in at.info)
     run_btn = next(b for b in at.button if "Fine-tune on Colab" in b.label)
