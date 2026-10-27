@@ -91,6 +91,14 @@ def test_delta_badge_classes():
     assert "+1.50" in components.build_delta_badge_html(1.5)
 
 
+# ─── components: wizard stepper ─────────────────────────────────────
+def test_stepper_marks_done_current_pending():
+    html = components.build_stepper_html(2, ["Goal", "Review & launch", "Monitor", "Report"])
+    assert "✓ Goal" in html  # step 1 done
+    assert 'stx-step active" style="flex:1">2 Review &amp; launch' in html
+    assert 'stx-step pending" style="flex:1">3 Monitor' in html  # upcoming plain
+
+
 # ─── data ───────────────────────────────────────────────────────────
 def _artifact(run_id="swzz01", delta=2.0, tokens=100):
     return {
@@ -202,7 +210,9 @@ def test_landing_run_demo_button_navigates(at_app):
     btn.click().run()
     assert not at_app.exception, [e.value for e in at_app.exception]
     assert at_app.session_state["nav_page"] == "🛰️ Live Run"
-    assert any("Fine-tune on Colab" in b.label for b in at_app.button)
+    # the wizard opens on the goal step
+    assert any("model learn" in ta.label for ta in at_app.text_area)
+    assert any("Plan with Nemotron" in b.label for b in at_app.button)
 
 
 def test_landing_evidence_strip_from_artifacts(at_app, tmp_path, monkeypatch):

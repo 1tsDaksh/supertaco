@@ -118,19 +118,29 @@ def app(offline, monkeypatch):
     at.run()
     assert not at.exception, f"initial render crashed: {[e.value for e in at.exception]}"
     at.session_state["nav_page"] = "🛰️ Live Run"
+    at.session_state["live_step"] = 2  # review step: launch controls live here
     at.run()
     assert not at.exception, f"live run page crashed: {[e.value for e in at.exception]}"
     return at
 
 
 def _goto_live(at):
-    """Navigate the routed app to the Live Run page."""
+    """Navigate the routed app to the Live Run page (review step)."""
     at.session_state["nav_page"] = "🛰️ Live Run"
+    at.session_state["live_step"] = 2
+    at.run()
+    return at
+
+
+def _goto_step(at, step: int):
+    """Jump the Live Run wizard to a specific step."""
+    at.session_state["live_step"] = step
     at.run()
     return at
 
 
 def _launch(app):
+    _goto_step(app, 2)  # the launch button lives on the review step
     btn = next(b for b in app.button if "Fine-tune on Colab" in b.label)
     btn.click().run()
     return app
@@ -218,12 +228,13 @@ def test_hash_judge_alert_says_unparseable_not_llm_unavailable(app, monkeypatch)
     warnings_text = "\n".join(w.value for w in app.warning)
     assert "unparseable" in warnings_text
     assert "LLM unavailable" not in warnings_text
-    # the call itself was real — setup panel and report must not contradict each other
-    app.run()  # panel renders before the run in a pass; re-render to see its calls
-    assert any("real call" in s.value for s in app.success)
     judge_df = next(df for df in app.dataframe if "judge" in df.value.columns)
     assert all("†" in str(m) for m in judge_df.value["judge"])
     assert any("†" in c.value for c in app.caption)
+    # the call itself was real — setup panel and report must not contradict each other
+    _goto_step(app, 2)  # the call-status banner lives on the review step
+    app.run()  # panel renders before the run in a pass; re-render to see its calls
+    assert any("real call" in s.value for s in app.success)
 
 
 def test_http_failure_alert_distinguishes_transport_from_hash(app, monkeypatch):
@@ -439,6 +450,7 @@ def test_knobs_overlay_config_yaml(app, monkeypatch):
     assert seen["lora_r"] == 8  # knob default beats YAML 32
     assert seen["model"] == "qwen2.5-0.5b"
     # an explicitly-set knob wins over both YAML and the default
+    _goto_step(app, 2)  # knobs render on the review step; the run left us on report
     lr_knob = next(w for w in app.number_input if w.label == "learning_rate")
     lr_knob.set_value(0.0009)
     _launch(app)
@@ -501,6 +513,7 @@ class PlanFakeLLM(FakeLLM):
 
 
 def test_goal_plan_then_run_threads_dataset_and_prompts(app, monkeypatch):
+    _goto_step(app, 1)  # goal + plan button live on the first wizard step
     class Recorder(FakeTransport):
         def run_attempt(self, config, prompts, on_line=None):
             self.prompts = list(prompts)
@@ -534,6 +547,7 @@ def test_goal_plan_then_run_threads_dataset_and_prompts(app, monkeypatch):
 
 
 def test_prompts_editor_labels_wrong_counts(app, monkeypatch):
+    _goto_step(app, 1)  # plan first; the prompts editor is on the review step
     _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), PlanFakeLLM())
     goal_box = next(ta for ta in app.text_area if "model learn" in ta.label)
     goal_box.set_value("g").run()
@@ -560,6 +574,7 @@ def test_prompts_editor_labels_wrong_counts(app, monkeypatch):
 
 
 def test_plan_fallback_shows_warning(app, monkeypatch):
+    _goto_step(app, 1)  # goal + plan button live on the first wizard step
     class FallbackLLM(PlanFakeLLM):
         def plan_goal(self, goal):
             return "I cannot help with that."
@@ -578,6 +593,40 @@ def test_plan_fallback_shows_warning(app, monkeypatch):
 def test_feedback_ui_hidden_without_run_result(app):
     assert not any("Re-run with feedback" in b.label for b in app.button)
     assert not any(ta.label == "Feedback on the result" for ta in app.text_area)
+
+
+# ─── Wizard transitions ─────────────────────────────────────────────
+def test_plan_success_advances_wizard_to_review(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), PlanFakeLLM())
+    _goto_step(app, 1)
+    goal_box = next(ta for ta in app.text_area if "model learn" in ta.label)
+    goal_box.set_value("answer like a pirate chef").run()
+    next(b for b in app.button if "Plan with Nemotron" in b.label).click().run()
+    assert not app.exception, [e.value for e in app.exception]
+    assert app.session_state["live_step"] == 2  # plan pressed -> review step
+    assert any("Plan ready" in s.value for s in app.success)
+
+
+def test_launch_advances_monitor_then_report(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    _launch(app)  # review -> monitor (runs the loop) -> report
+    assert not app.exception, [e.value for e in app.exception]
+    assert app.session_state["live_step"] == 4  # finished runs land on the report
+    assert any("Training Report" in m.value for m in app.markdown)
+    assert any("Re-run with feedback" in b.label for b in app.button)  # feedback lives here
+
+
+def test_wizard_back_buttons_walk_the_steps(app, monkeypatch):
+    _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
+    _launch(app)
+    assert app.session_state["live_step"] == 4
+    next(b for b in app.button if "Back to monitor" in b.label).click().run()
+    assert app.session_state["live_step"] == 3
+    next(b for b in app.button if "Back to review" in b.label).click().run()
+    assert app.session_state["live_step"] == 2
+    next(b for b in app.button if "Back to goal" in b.label).click().run()
+    assert app.session_state["live_step"] == 1
+    assert any("model learn" in ta.label for ta in app.text_area)
 
 
 def _seed_plan_keys(app):
@@ -668,6 +717,9 @@ def _patch_feedback(monkeypatch, *, plan_mode="real", note="shorter, tighter"):
 
 
 def test_feedback_button_revises_and_reruns(app, monkeypatch):
+    # pick the model on the review step BEFORE launching: the selectbox only
+    # exists while that step renders, and the revision must carry this choice
+    next(sb for sb in app.selectbox if sb.label == "model").set_value("tinyllama-1.1b").run()
     _patch_run(monkeypatch, FakeTransport([(HEALTHY_LOG, "ok", None)]), FakeLLM())
     _launch(app)
     assert not app.exception, [e.value for e in app.exception]
@@ -676,9 +728,8 @@ def test_feedback_button_revises_and_reruns(app, monkeypatch):
 
     _seed_plan_keys(app)
     seen = _patch_feedback(monkeypatch)
-    app.run()  # feedback box appears now that a run finished
+    app.run()  # feedback box appears on the report step now that a run finished
 
-    next(sb for sb in app.selectbox if sb.label == "model").set_value("tinyllama-1.1b")
     fb = next(ta for ta in app.text_area if ta.label == "Feedback on the result")
     fb.set_value("be more concise")
     next(b for b in app.button if "Re-run with feedback" in b.label).click().run()
@@ -797,6 +848,7 @@ def test_manual_rerun_after_feedback_clears_delta_caption(app, monkeypatch):
     assert any("Before feedback:" in c.value for c in app.caption)
 
     # a MANUAL run is not feedback-driven: the baseline must be invalidated
+    _goto_step(app, 2)  # the launch button lives on the review step
     next(b for b in app.button if "Fine-tune on Colab" in b.label).click().run()
     assert not app.exception, [e.value for e in app.exception]
     assert not any("Before feedback:" in c.value for c in app.caption)
@@ -1063,18 +1115,26 @@ def test_execute_launch_passes_plan_goal_to_loop(offline, monkeypatch):
 def test_showcase_banner_and_disabled_controls(offline, monkeypatch):
     monkeypatch.setenv("SUPERTACO_SHOWCASE", "1")
     at = AppTest.from_file(str(DASHBOARD), default_timeout=60)
-    _goto_live(at)
+    at.session_state["nav_page"] = "🛰️ Live Run"
+    at.session_state["live_step"] = 2  # review step holds the launch controls
+    at.run()
     assert not at.exception, f"showcase render crashed: {[e.value for e in at.exception]}"
     assert any("Showcase mode" in i.value for i in at.info)
     run_btn = next(b for b in at.button if "Fine-tune on Colab" in b.label)
     assert run_btn.disabled
     judge_box = next(c for c in at.checkbox if "Judge on Nebius" in c.label)
     assert judge_box.disabled
+    # planning stays live on the goal step
+    at.session_state["live_step"] = 1
+    at.run()
     plan_btn = next(b for b in at.button if "Plan with Nemotron" in b.label)
     assert not plan_btn.disabled
     # disabled= is UX only: the server-side guard must block a crafted click too
+    at.session_state["live_step"] = 2
+    at.run()
     transport = FakeTransport([(HEALTHY_LOG, "ok", None)])
     _patch_run(monkeypatch, transport, FakeLLM())
+    run_btn = next(b for b in at.button if "Fine-tune on Colab" in b.label)
     run_btn.click().run()
     assert not at.exception, f"showcase run crashed: {[e.value for e in at.exception]}"
     assert transport.calls == 0

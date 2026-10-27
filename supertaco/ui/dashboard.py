@@ -88,6 +88,7 @@ def init_session2():
         "run_active": False,
         "gpu_result": None,
         "gpu_lines": [],
+        "live_step": 1,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -125,8 +126,9 @@ def main():
         }
     )
     st.sidebar.markdown("### 🌮 SuperTaco")
+    st.sidebar.caption("Pages")
     choice = st.sidebar.radio(
-        "Navigate",
+        "Pages",
         list(_PAGES),
         key="nav_page",
         label_visibility="collapsed",

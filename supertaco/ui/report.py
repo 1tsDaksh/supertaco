@@ -213,6 +213,9 @@ def render_report() -> None:
             st.info("Run the supervisor loop to see attempts, judge scores and config changes.")
         return
 
+    if not result.success:
+        st.error(f"🛑 {result.error}")  # failures stay loud on the report step
+
     if result.attempt_ledger:
         if result.success and result.attempts == 1:
             outcome = "✅ succeeded on first attempt - no heal needed"

@@ -177,3 +177,23 @@ def build_delta_badge_html(delta: float) -> str:
 
 def render_delta_badge(delta: float) -> None:
     st.html(build_delta_badge_html(delta))
+
+
+def build_stepper_html(current: int, steps: Sequence[str]) -> str:
+    """Wizard step indicator: numbered chips, done = ✓, current highlighted."""
+    parts = []
+    for idx, label in enumerate(steps, start=1):
+        if idx < current:
+            cls, mark = "done", "✓"
+        elif idx == current:
+            cls, mark = "active", str(idx)
+        else:
+            cls, mark = "pending", str(idx)
+        parts.append(
+            f'<div class="stx-step {cls}" style="flex:1">{mark} {esc(label)}</div>'
+        )
+    return f'<div style="display:flex;gap:8px;margin-bottom:14px">{"".join(parts)}</div>'
+
+
+def render_stepper(current: int, steps: Sequence[str]) -> None:
+    st.html(build_stepper_html(current, steps))
