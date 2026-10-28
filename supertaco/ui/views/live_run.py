@@ -7,6 +7,12 @@ One step on screen at a time, with transitions on button presses:
    (live during the run).
 4. **Report** — attempt ledger, judge summary, artifact download, feedback loop.
 
+The supervisor loop runs on a **worker thread** (``supertaco.ui.live_state``), so
+a run is never tied to the browser session: Streamlit can abort a script at any
+``st.*`` yield point on a stop/reload, and that must never truncate a finished run
+or strand the wizard on "running". The monitor polls the worker and advances to
+the report by itself.
+
 Patchable collaborators (loop, planner, transport) are always reached through
 their module objects so tests can monkeypatch between runs.
 """
@@ -14,6 +20,7 @@ their module objects so tests can monkeypatch between runs.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 import plotly.graph_objects as go  # type: ignore[import-untyped]  # plotly ships no stubs
@@ -22,13 +29,19 @@ import yaml
 
 import supertaco.loop as loop_mod
 import supertaco.planner as planner_mod
-from supertaco.errors import ConfigurationError
 from supertaco.eval.harness import PROMPT_SUITE_SIZE
-from supertaco.loop import Event, extract_loss_points
-from supertaco.ui import components, report, runtime
+from supertaco.ui import components, live_state, report, runtime
 from supertaco.ui.theme import TOKENS
 
 _RUN_BTN_LABEL = "🚀 Fine-tune on Colab (supervisor loop)"
+
+_POLL_INTERVAL = 0.75  # seconds between monitor refreshes (tests patch this down)
+
+# The browser polls with a fragment timer so the page's script run finishes and
+# Streamlit retires the previous step's widgets. AppTest cannot follow run_every
+# (its merged element tree raises KeyError on unkeyed widget ids), so tests turn
+# this off and exercise the plain rerun fallback instead.
+_POLL_WITH_FRAGMENT = True
 
 STEPS = ("Goal", "Review & launch", "Monitor", "Report")
 
@@ -237,68 +250,74 @@ def _gpu_figure(loss_points: list):
     return _style_fig(fig)
 
 
-def execute_launch(
-    config,
-    max_retries,
-    timeline_slot,
-    logs_slot,
-    chart_slot,
-    prompts=None,
-    judge_backend="direct",
-    phase_slot=None,
-):
-    """Run the real loop, streaming events + the auto-scrolled terminal into slots."""
-    from supertaco.gpu.transport import ColabTransport
-
-    events: list[Event] = []
-    live_points: list[float] = []
-    term_lines: list[str] = []
-
-    def refresh_phase() -> None:
-        if phase_slot is not None:
-            phase_slot.html(components.build_phase_timeline_html(components.phase_states(events)))
-
-    def on_line(ln: str) -> None:
-        term_lines.append(ln[-500:])
-        st.session_state["term_lines"] = list(term_lines)  # pinned terminal mirror
-        logs_slot.html(components.build_terminal_html(term_lines))
-        pts = extract_loss_points(ln)
-        if pts:
-            before = len(live_points)
-            live_points.extend(p for p in pts if p == p)
-            if len(live_points) > before:
-                chart_slot.plotly_chart(_gpu_figure(live_points), width="stretch")
-
-    def on_event(ev: Event) -> None:
-        events.append(ev)
-        st.session_state["events"] = events  # survive a mid-run crash (spec 6)
-        report.render_timeline(timeline_slot, events)
-        refresh_phase()
-        if ev.type == "logs_produced":
-            text = ev.data["text"]
-            term_lines.extend(text.splitlines() or [""])
-            st.session_state["term_lines"] = list(term_lines)
-            logs_slot.html(components.build_terminal_html(term_lines))
-            chart_slot.plotly_chart(_loss_figure(events), width="stretch")
-
+def execute_launch(request: dict) -> live_state.LiveRun:
+    """Start the loop on a worker thread and return immediately (never blocks)."""
+    run = live_state.start_run(
+        config=request["config"],
+        retries=request["retries"],
+        prompts=request["prompts"],
+        judge_backend=request["judge_backend"],
+        goal=st.session_state.get("plan_goal") or None,
+    )
+    st.session_state["live_run_token"] = run.token
     st.session_state["run_active"] = True
-    refresh_phase()
-    try:
-        result = loop_mod.run_training_loop(
-            config,
-            transport=ColabTransport(),
-            on_event=on_event,
-            on_line=on_line,
-            llm=loop_mod.make_llm(),
-            max_retries=max_retries,
-            runs_dir="configs/runs",
-            prompts=prompts,
-            judge_backend=judge_backend,
-            goal=(st.session_state.get("plan_goal") or None),
-        )
-    finally:
-        st.session_state["run_active"] = False
-    return events, result
+    return run
+
+
+def _consume_launch_request(showcase: bool) -> None:
+    """Start a stashed launch before the page header is rendered.
+
+    Launching here (not inside the monitor renderer) means the status chip and
+    stepper already see the in-flight run on the very first monitor frame.
+    """
+    request = st.session_state.pop("launch_request", None)
+    if not request:
+        return
+    if showcase:
+        st.warning("Training is disabled in showcase mode.")
+        return
+    execute_launch(request)
+
+
+def _sync_run_state() -> None:
+    """Publish a finished background run into session state and advance to Report.
+
+    Runs at the top of every app rerun, so the wizard advances even if the polling
+    fragment is not on screen (e.g. the user came back after a reload).
+    """
+    token = st.session_state.get("live_run_token")
+    if token and live_state.get_run(token) is None:
+        st.session_state["live_run_token"] = None  # registry lost it (app restart)
+        token = None
+    if not token:
+        adopted = live_state.adoptable()
+        if adopted is None:
+            return
+        # A run survives the browser tab: re-attach the new session to it.
+        token = adopted.token
+        st.session_state["live_run_token"] = token
+        if st.session_state.get("live_step", 1) == 1:
+            st.session_state["live_step"] = 4 if adopted.done else 3
+
+    run = live_state.get_run(token)
+    if run is None:
+        return
+    if not run.done:
+        st.session_state["run_active"] = True
+        return
+
+    st.session_state["run_active"] = False
+    if st.session_state.get("run_published_token") == token:
+        return  # already published: revisiting the monitor must not bounce forward
+    result = run.result
+    st.session_state["events"] = run.events_snapshot()
+    st.session_state["term_lines"] = run.lines_snapshot()
+    st.session_state["run_result"] = result
+    st.session_state["llm_calls"] = list(getattr(result, "llm_calls", []) or [])
+    st.session_state["run_error"] = run.error if result is None else None
+    st.session_state["run_published_token"] = token
+    if st.session_state.get("live_step") == 3:
+        st.session_state["live_step"] = 4  # the report is never left waiting
 
 
 def _run_status(events: list, run_active: bool, run_result) -> str:
@@ -404,7 +423,15 @@ def _render_step_review(showcase: bool) -> None:
                 "to direct Token Factory judging on infra failure."
             ),
         )
-        if st.button(_RUN_BTN_LABEL, type="primary", width="stretch", disabled=showcase):
+        run_in_flight = bool(st.session_state.get("run_active"))
+        if run_in_flight:
+            st.caption("⏳ A run is still in flight — open Monitor to watch it, or wait for it.")
+        if st.button(
+            _RUN_BTN_LABEL,
+            type="primary",
+            width="stretch",
+            disabled=showcase or run_in_flight,
+        ):
             if showcase:
                 st.warning("Training is disabled in showcase mode.")
             else:
@@ -412,75 +439,83 @@ def _render_step_review(showcase: bool) -> None:
                 st.rerun()
 
 
-def _render_step_monitor(showcase: bool) -> None:
-    """Step 3 — live activity while the run executes; replays the last run otherwise."""
-    st.markdown("#### 📡 Monitor")
-    st.caption("Step 3 of 4 — the run streams here; you advance to the report when it finishes.")
-    phase_slot = st.empty()
-    events = st.session_state.get("events") or []
-    phase_slot.html(components.build_phase_timeline_html(components.phase_states(events)))
-
+def _render_live_body(run: live_state.LiveRun) -> None:
+    """One monitor frame, built from a thread-safe snapshot of the worker's run."""
+    events = run.events_snapshot()
+    st.html(components.build_phase_timeline_html(components.phase_states(events)))
     with st.container(border=True):
-        timeline_slot = st.empty()
-        term_slot = st.empty()
-        chart_slot = st.empty()
-
-        request = st.session_state.pop("launch_request", None)
-        if request and showcase:
-            st.warning("Training is disabled in showcase mode.")
-            request = None
-        if request:
-            try:
-                ran_events, result = execute_launch(
-                    request["config"],
-                    request["retries"],
-                    timeline_slot,
-                    term_slot,
-                    chart_slot,
-                    prompts=request["prompts"],
-                    judge_backend=request["judge_backend"],
-                    phase_slot=phase_slot,
-                )
-                st.session_state["events"] = ran_events
-                st.session_state["run_result"] = result
-                st.session_state["llm_calls"] = result.llm_calls
-                if not result.success:
-                    st.error(f"🛑 {result.error}")
-                else:
-                    st.toast("✅ Run complete", icon="✅")
-            except ConfigurationError as exc:
-                st.session_state["run_error"] = f"❌ {exc}"
-                report.render_timeline(timeline_slot, st.session_state.get("events", []))
-            except Exception as exc:  # spec 6: never a Streamlit traceback
-                st.session_state["run_error"] = f"❌ Run crashed: {exc}"
-                report.render_timeline(timeline_slot, st.session_state.get("events", []))
-            finally:
-                # Whatever happened — success, judge failure or crash — the run is
-                # over and the user must land on the report, never a dead monitor.
-                st.session_state["live_step"] = 4
-                st.rerun()
-        elif st.session_state.get("events"):
-            report.render_timeline(timeline_slot, st.session_state["events"])
-            latest_logs = next(
-                (
-                    e.data["text"]
-                    for e in reversed(st.session_state["events"])
-                    if e.type == "logs_produced"
-                ),
-                "",
-            )
-            term_slot.html(components.build_terminal_html(latest_logs.splitlines() or ["—"]))
-            chart_slot.plotly_chart(_loss_figure(st.session_state["events"]), width="stretch")
-            if st.session_state.get("run_result") is not None and st.button("View report →"):
-                _goto(4)
+        report.render_timeline(st.empty(), events)
+        lines = run.lines_snapshot()
+        if lines:
+            components.render_terminal(lines)
         else:
-            timeline_slot.info("Nothing to monitor yet — launch a run from the review step.")
+            st.caption("waiting for the first log lines…")
+        points = run.loss_snapshot()
+        if points:
+            st.plotly_chart(_gpu_figure(points), width="stretch")
+    st.caption(f"elapsed {run.elapsed:.0f}s · {len(events)} events · {len(lines)} log lines")
 
-        calls = st.session_state.get("llm_calls") or []
-        if calls:
-            with st.expander(f"🧠 LLM Calls ({len(calls)})"):
-                st.dataframe(report.llm_rows(calls), width="stretch", hide_index=True)
 
+@st.fragment(run_every=_POLL_INTERVAL)
+def _live_fragment(token: str) -> None:
+    """Auto-refreshing live snapshot.
+
+    Only this subtree reruns on the timer, so the page's script run completes and
+    Streamlit can retire the previous step's widgets. (A plain ``st.rerun()`` poll
+    never lets a run finish, which left the review step's config panel stranded
+    on screen below the monitor.)
+    """
+    run = live_state.get_run(token)
+    if run is None:
+        return
+    _render_live_body(run)
+    if run.done:
+        st.rerun(scope="app")  # publish the result and open the report
+
+
+def _render_step_monitor(showcase: bool) -> None:
+    """Step 3 — live activity from the background worker (never blocks the script).
+
+    The training loop lives in a worker thread, so a browser reload or a stop
+    request can no longer kill a finished run.
+    """
+    st.markdown("#### 📡 Monitor")
+    st.caption(
+        "Step 3 of 4 — the run streams here and the report opens by itself when it finishes."
+    )
+
+    token = st.session_state.get("live_run_token")
+    run = live_state.get_run(token)
+    if run is not None:
+        if _POLL_WITH_FRAGMENT:
+            _live_fragment(run.token)
+        else:  # AppTest fallback: one snapshot per script run
+            _render_live_body(run)
+            if not run.done:
+                time.sleep(_POLL_INTERVAL)
+                st.rerun()
+            elif st.session_state.get("run_published_token") != run.token:
+                st.rerun()
+    elif st.session_state.get("events"):
+        events = st.session_state["events"]
+        st.html(components.build_phase_timeline_html(components.phase_states(events)))
+        report.render_timeline(st.empty(), events)
+        term_lines = st.session_state.get("term_lines") or []
+        if term_lines:
+            components.render_terminal(term_lines)
+        st.plotly_chart(_loss_figure(events), width="stretch")
+    else:
+        st.info("Nothing to monitor yet — launch a run from the review step.")
+
+    calls = st.session_state.get("llm_calls") or []
+    if calls:
+        with st.expander(f"🧠 LLM Calls ({len(calls)})"):
+            st.dataframe(report.llm_rows(calls), width="stretch", hide_index=True)
+
+    if st.session_state.get("run_result") is not None:
+        if st.button("View report →"):
+            _goto(4)
+            return
     if not st.session_state.get("run_active"):
         if st.button("← Back to review"):
             _goto(2)
@@ -598,6 +633,8 @@ def _render_step_report(showcase: bool) -> None:
 def render_live_run() -> None:
     """Wizard shell: one step visible at a time, transitions on button presses."""
     showcase = runtime.showcase_enabled()
+    _sync_run_state()  # adopt/publish a background run before choosing the step
+    _consume_launch_request(showcase)  # the header must see a just-launched run
     events = st.session_state.get("events") or []
     run_active = bool(st.session_state.get("run_active"))
     run_result = st.session_state.get("run_result")

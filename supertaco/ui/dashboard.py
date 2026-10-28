@@ -89,6 +89,10 @@ def init_session2():
         "gpu_result": None,
         "gpu_lines": [],
         "live_step": 1,
+        "live_run_token": None,
+        "run_published_token": None,
+        "run_error": None,
+        "term_lines": [],
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -99,6 +103,9 @@ def init_session2():
 
 def reset_session2():
     """Reset all session-state variables."""
+    from supertaco.ui import live_state
+
+    live_state.clear_finished()  # a fresh session must not re-adopt old runs
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     init_session2()

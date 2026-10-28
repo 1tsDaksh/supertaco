@@ -1,13 +1,15 @@
 """Redesign module tests: theme, components, data, and the Landing/Results pages."""
 
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from supertaco.ui import components, theme
+from supertaco.loop import Event
+from supertaco.ui import components, live_state, theme
 from supertaco.ui import data as data_mod
 from supertaco.ui.views import landing
 
@@ -97,6 +99,104 @@ def test_stepper_marks_done_current_pending():
     assert "✓ Goal" in html  # step 1 done
     assert 'stx-step active" style="flex:1">2 Review &amp; launch' in html
     assert 'stx-step pending" style="flex:1">3 Monitor' in html  # upcoming plain
+
+
+# ─── background run execution ───────────────────────────────────────
+def test_live_state_runs_off_thread_and_captures_stream(monkeypatch):
+    """The loop runs in a worker: events, log lines and loss points are captured."""
+    import supertaco.loop as loop_mod
+
+    def fake_loop(config, *, on_event, on_line, **kwargs):
+        on_event(Event("run_started", {}))
+        on_line("step 1 loss 2.5")
+        on_line("step 2 loss 1.5")
+        on_event(Event("logs_produced", {"text": "step 1 loss 2.5\nstep 2 loss 1.5"}))
+        return SimpleNamespace(success=True, llm_calls=[], artifact=None)
+
+    monkeypatch.setattr(loop_mod, "run_training_loop", fake_loop)
+    monkeypatch.setattr(loop_mod, "make_llm", lambda: None)
+    monkeypatch.setattr("supertaco.gpu.transport.ColabTransport", lambda: object())
+
+    run = live_state.start_run(config={"model": "qwen2.5-0.5b"}, retries=1, goal="pirate chef")
+    deadline = time.time() + 10
+    while not run.done and time.time() < deadline:
+        time.sleep(0.01)
+    assert run.done is True
+    assert run.result.success is True
+    assert [e.type for e in run.events_snapshot()] == ["run_started", "logs_produced"]
+    assert run.lines_snapshot() == ["step 1 loss 2.5", "step 2 loss 1.5"]  # no duplicates
+    assert run.loss_snapshot() == [2.5, 1.5]
+    assert live_state.get_run(run.token) is run
+    live_state.clear_run(run.token)
+    assert live_state.get_run(run.token) is None
+
+
+def test_live_state_records_crash_without_raising(monkeypatch):
+    import supertaco.loop as loop_mod
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("colab-cli died")
+
+    monkeypatch.setattr(loop_mod, "run_training_loop", boom)
+    monkeypatch.setattr(loop_mod, "make_llm", lambda: None)
+    monkeypatch.setattr("supertaco.gpu.transport.ColabTransport", lambda: object())
+
+    run = live_state.start_run(config={}, retries=1)
+    deadline = time.time() + 10
+    while not run.done and time.time() < deadline:
+        time.sleep(0.01)
+    assert run.done is True
+    assert run.result is None
+    assert "colab-cli died" in run.error
+    live_state.clear_run(run.token)
+
+
+def test_fresh_session_adopts_a_just_finished_run(offline, monkeypatch):
+    """Reloading during/after a run must land on its report, not the goal step."""
+    import supertaco.loop as loop_mod
+    from supertaco.loop import LoopResult
+    from supertaco.ui.views import live_run
+
+    def fake_loop(config, *, on_event, on_line, **kwargs):
+        on_event(Event("run_started", {}))
+        on_line("training finished")
+        return LoopResult(
+            success=True,
+            attempts=1,
+            final_config={},
+            configs_written=[],
+            failure_key=None,
+            error=None,
+            llm_calls=[],
+            eval_results={
+                "prompts": ["p0"],
+                "base_scores": [2.0],
+                "fine_tuned_scores": [8.0],
+                "modes": ["base:real / ft:real"],
+                "regression_flagged": False,
+            },
+        )
+
+    monkeypatch.setattr(loop_mod, "run_training_loop", fake_loop)
+    monkeypatch.setattr(loop_mod, "make_llm", lambda: None)
+    monkeypatch.setattr("supertaco.gpu.transport.ColabTransport", lambda: object())
+    monkeypatch.setattr(live_run, "_POLL_INTERVAL", 0.01)
+
+    run = live_state.start_run(config={"model": "qwen2.5-0.5b"}, retries=1)
+    deadline = time.time() + 10
+    while not run.done and time.time() < deadline:
+        time.sleep(0.01)
+    assert run.done is True
+
+    monkeypatch.delenv("SUPERTACO_SHOWCASE", raising=False)
+    at = AppTest.from_file(str(DASHBOARD), default_timeout=60)
+    at.run()
+    at.session_state["nav_page"] = "🛰️ Live Run"  # a brand-new session
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.session_state["live_step"] == 4  # published straight into the report
+    assert at.session_state["run_result"] is not None
+    assert any("Training Report" in m.value for m in at.markdown)
 
 
 # ─── data ───────────────────────────────────────────────────────────

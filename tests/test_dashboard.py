@@ -2,6 +2,7 @@
 
 import json
 import re
+import time
 from pathlib import Path
 
 import pytest
@@ -105,9 +106,11 @@ class StreamingFakeTransport(FakeTransport):
 def _patch_run(monkeypatch, transport, llm):
     import supertaco.gpu.transport as transport_mod
     import supertaco.loop as loop_mod
+    from supertaco.ui.views import live_run
 
     monkeypatch.setattr(transport_mod.ColabTransport, "run_attempt", transport.run_attempt)
     monkeypatch.setattr(loop_mod, "make_llm", lambda: llm)
+    monkeypatch.setattr(live_run, "_POLL_INTERVAL", 0.01)  # tests must not sleep
 
 
 @pytest.fixture()
@@ -139,11 +142,28 @@ def _goto_step(at, step: int):
     return at
 
 
+def _wait_for_report(app, timeout: float = 20.0):
+    """Poll the app until the background run finishes and the wizard lands on Report."""
+    deadline = time.time() + timeout
+    while True:
+        try:
+            step = app.session_state["live_step"]
+        except KeyError:
+            step = None
+        if step == 4:
+            return app
+        if time.time() > deadline:
+            raise AssertionError(f"run never reached the report (step={step})")
+        time.sleep(0.05)
+        app.run()
+
+
 def _launch(app):
+    """Click launch (starts a background run) and poll until the report opens."""
     _goto_step(app, 2)  # the launch button lives on the review step
     btn = next(b for b in app.button if "Fine-tune on Colab" in b.label)
     btn.click().run()
-    return app
+    return _wait_for_report(app)
 
 
 class UnparseableJudgeLLM(FakeLLM):
@@ -369,26 +389,13 @@ def test_oom_crash_heal_says_healed_after_2_and_advisory_caption(app, monkeypatc
     assert any("advisory" in c.value for c in app.caption)
 
 
-def test_run_in_progress_status_while_active(app, monkeypatch):
-    transport = FakeTransport([(HEALTHY_LOG, "ok", None)])
-    _patch_run(monkeypatch, transport, FakeLLM())
+def test_run_in_progress_status_affects_header_chip(app, monkeypatch):
+    """An in-flight run must be visible in the header chip (the run is off-thread)."""
+    from supertaco.ui.views import live_run
 
-    import streamlit as st
-
-    import supertaco.loop as loop_mod
-
-    seen = {}
-    real_loop = loop_mod.run_training_loop
-
-    def spy(*args, **kwargs):
-        seen["active"] = st.session_state.get("run_active")
-        return real_loop(*args, **kwargs)
-
-    monkeypatch.setattr(loop_mod, "run_training_loop", spy)
-    _launch(app)
-    assert not app.exception, [e.value for e in app.exception]
-    assert seen["active"] is True  # set before the blocking loop
-    assert app.session_state["run_active"] is False  # cleared in finally
+    assert live_run._run_status([], True, None) == "running"
+    assert live_run._run_status([], False, None) == "idle"
+    assert live_run._run_status([], True, object()) == "running"  # active wins
 
 
 def test_nan_failure_heals_with_patch(app, monkeypatch):
