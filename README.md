@@ -20,6 +20,29 @@ Three Nebius/NVIDIA surfaces, all live:
 
 ---
 
+## What's new in V2 (dashboard)
+
+V2 is the release where the dashboard became the product, not just a viewer:
+
+- **Three pages, one narrative.** `Landing` explains the pipeline and shows live evidence
+  from recorded runs; `Live Run` is a four-step wizard (`Goal → Review & launch → Monitor →
+  Report`) that shows one step at a time; `Results` is the sweep table plus per-run detail
+  with copy-paste `verify` commands.
+- **Runs survive the browser.** The supervisor loop executes on a daemon worker thread, so a
+  reload, a closed tab, or a Streamlit stop request can no longer truncate a finished run.
+  A new session re-attaches to an active run (or one that finished moments ago) and lands on
+  its report.
+- **The report is never lost.** Results are published and the wizard advances to `Report` on
+  every rerun; the monitor refreshes via a fragment timer and opens the report by itself.
+  The run log and event timeline replay with the report.
+- **Live monitor that holds up.** Phase timeline, auto-scrolling terminal with full history,
+  and the real T4 loss curve, with a status chip that flips to `running` on the first frame.
+- **Receipts stay honest.** `plan: real|fallback`, judge-backend badges, before→after deltas
+  only when both judges were real, and token totals summed from run artifacts — never
+  fabricated.
+
+---
+
 ## Table of contents
 
 1. [How it works](#how-it-works)
@@ -320,17 +343,29 @@ audit log above. The three-surface table is at the [top of this README](#superta
 
 ## Dashboard
 
-`streamlit run supertaco/ui/dashboard.py` gives:
+`streamlit run supertaco/ui/dashboard.py` gives three routed pages (sidebar radio, so the
+whole shell is testable with `AppTest`):
 
-- **Goal panel** — free-text goal → plan preview (dataset source + 5 eval prompts) → run.
-- **Job launcher** — config editor with knob overrides, model dropdown (whitelist only),
-  max-retries, and the **"Judge on Nebius AI Cloud (serverless job)"** toggle (default on).
-- **Live view** — streaming event timeline, loss chart, raw log tail while the T4 trains.
-- **Attempt-ledger report** — per-attempt table (config delta, loss trajectory, status),
-  base-vs-fine-tuned judge table with per-cell mode honesty (real / fallback / job),
-  the regression verdict, and the **✓ Judged on Nebius AI Cloud** badge when applicable.
-- **Feedback box** — after a run, type feedback → re-run with a revised plan and a
-  mode-honest before→after delta (the baseline is invalidated on manual re-runs).
+- **Landing** — hero, the six-stage pipeline, capability cards, and a live evidence strip
+  (success rate, improved count, avg Δ judge points, token totals) computed from the recorded
+  runs in `logs/runs/`, plus the best run and copy-paste verification commands.
+- **Live Run — step 1, Goal** — free-text goal → real Nemotron plan (dataset source, 5 eval
+  prompts, LoRA knobs) with a `plan: real|fallback` badge.
+- **Live Run — step 2, Review & launch** — config editor with knob overrides, model dropdown
+  (whitelist only), max-retries, and the **"Judge on Nebius AI Cloud (serverless job)"**
+  toggle (default on).
+- **Live Run — step 3, Monitor** — phase timeline, auto-scrolling terminal with full history,
+  live loss curve and event feed while the T4 trains; the page refreshes itself and the
+  status chip reads `running`.
+- **Live Run — step 4, Report** — per-attempt ledger (config delta, loss trajectory, status),
+  base-vs-fine-tuned judge table with per-cell mode honesty (real / fallback / job), the
+  regression verdict, the **✓ Judged on Nebius AI Cloud** badge when applicable, the full run
+  log, and the feedback box (revised plan + mode-honest before→after delta).
+- **Results** — sweep table over recorded runs, per-run detail, and a verify snippet per row.
+
+A run belongs to the server, not the tab: the loop lives on a worker thread
+(`supertaco/ui/live_state.py`), so reloading mid-run re-attaches and a finished run still
+opens its report.
 
 ---
 
@@ -357,10 +392,10 @@ dashboard toggle to skip the job path entirely.
 ## Testing & hermeticity
 
 ```bash
-python -m pytest tests/ -q                # 286 tests - transport and LLM faked, no network/credits
+python -m pytest tests/ -q                # 354 tests - transport and LLM faked, no network/credits
 python -m ruff check .                    # lint
 python -m ruff format --check supertaco tests
-python -m mypy supertaco/                 # clean (22 files)
+python -m mypy supertaco/                 # clean (34 files)
 ```
 
 - The whole suite is **audit-hermetic**: an autouse fixture (`tests/conftest.py`) redirects
@@ -475,6 +510,11 @@ configs/
 ---
 
 ## Status
+
+**V2.0.0 (2026-10-29)** — the three-page dashboard is the default entry point. The full
+loop is live end to end: goal → real Nemotron plan → Colab T4 LoRA training → self-healing
+(OOM/NaN/plateau/... patched and relaunched) → Nebius Serverless Job judge → before/after
+report. Runs are worker-threaded and survive reloads; the report opens by itself.
 
 Goal-driven runs are live: type a plain-English goal, Nemotron plans the run, generates the
 synthetic dataset, trains on a Colab T4, self-heals failures (e.g. OOM → halved batch +

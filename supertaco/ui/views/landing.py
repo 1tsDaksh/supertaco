@@ -106,7 +106,7 @@ _STACK = (
     ("Judge backend", "Nebius Serverless Jobs, with direct-API fallback"),
     ("Citations", "Tavily search, surfaced next to every patch proposal"),
     ("Artifacts", "Schema-v1 JSON in logs/runs + append-only llm_calls.jsonl"),
-    ("Dashboard", "Streamlit multi-page app (this UI), 343-test offline suite"),
+    ("Dashboard", "Streamlit multi-page app (this UI), 350+ test offline suite"),
 )
 
 
