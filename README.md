@@ -396,7 +396,7 @@ dashboard toggle to skip the job path entirely.
 ## Testing & hermeticity
 
 ```bash
-python -m pytest tests/ -q                # 354 tests - transport and LLM faked, no network/credits
+python -m pytest tests/ -q                # 357 tests - transport and LLM faked, no network/credits
 python -m ruff check .                    # lint
 python -m ruff format --check supertaco tests
 python -m mypy supertaco/                 # clean (34 files)
