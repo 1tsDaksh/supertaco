@@ -40,6 +40,9 @@ V2 is the release where the dashboard became the product, not just a viewer:
 - **Receipts stay honest.** `plan: real|fallback`, judge-backend badges, before→after deltas
   only when both judges were real, and token totals summed from run artifacts — never
   fabricated.
+- **Heals are inspectable after the fact.** Any recorded run replays its decision trail in
+  `Results` (detected failure → Nemotron reasoning + sources → exact config patch → relaunch),
+  so a healed run is evidence, not a log line.
 
 ---
 
@@ -361,7 +364,8 @@ whole shell is testable with `AppTest`):
   base-vs-fine-tuned judge table with per-cell mode honesty (real / fallback / job), the
   regression verdict, the **✓ Judged on Nebius AI Cloud** badge when applicable, the full run
   log, and the feedback box (revised plan + mode-honest before→after delta).
-- **Results** — sweep table over recorded runs, per-run detail, and a verify snippet per row.
+- **Results** — sweep table over recorded runs, per-run detail, a heal timeline (failure →
+  Nemotron reasoning → patch → relaunch) and a verify snippet per row.
 
 A run belongs to the server, not the tab: the loop lives on a worker thread
 (`supertaco/ui/live_state.py`), so reloading mid-run re-attaches and a finished run still
@@ -430,6 +434,35 @@ Everything above is not just unit-tested — it has run for real (details in the
   judge delta; also flushed out (and fixed) a cp1252/Unicode prompt-key bug with a
   regression test that reproduces the exact live error.
 
+### Heal, captured from the dashboard (`sw0443`)
+
+The Results page replays a run's whole decision trail from its schema-v1 artifact. This is
+the real dashboard (`Results → Run detail → sw0443`) on the `EVAL_REGRESSION` heal from the
+sweep:
+
+![Healed run in the Results page: attempts 2, healed yes, judge 2.00 to 2.40](assets/heal-run-detail.png)
+
+Two attempts, `healed: yes`, and the winning adapter still moved the judge 2.00 → 2.40
+(`nebius_job`, `base:real / ft:real`, 5/5 prompts scored).
+
+The timeline is generated from the artifact's `events[]`: attempt 1 regressed, the
+classifier flagged `EVAL_REGRESSION`, Nemotron's reasoning is attached with its sources, the
+deterministic playbook rewrote the knobs, and attempt 2 passed.
+
+![Heal timeline: detected EVAL_REGRESSION, Nemotron reasoning, patch, relaunch, healed after 2 attempts](assets/heal-timeline.png)
+
+```
+learning_rate: 0.0002 → 0.0001   lora_alpha: 16 → 8   lora_dropout: 0.05 → 0.1
+lora_r: 8 → 4                    num_epochs: 3 → 2
+```
+
+Verify it yourself — the run is committed as [examples/runs/sw0443.json](examples/runs/sw0443.json):
+
+```bash
+grep -c '"run_id": "sw0443"' logs/llm_calls.jsonl   # judge/classify/patch calls for this run
+cat logs/runs/sw0443.json                            # events[] + attempt_ledger[]
+```
+
 ---
 
 ## Sweep results (10-goal sweep)
@@ -484,6 +517,9 @@ configs/
   base/                  reference configs (never modified)
   defaults/colab_t4.yaml the shipped default
   runs/                  every generated/patched config (audit trail)
+assets/
+  heal-run-detail.png    README proof: healed run in the Results page (sw0443)
+  heal-timeline.png      README proof: detected -> Nemotron -> patch -> relaunch -> healed
 ```
 
 ---

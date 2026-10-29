@@ -52,9 +52,12 @@ def render_events_markdown(events: list) -> str:
             changed = ", ".join(
                 f"{k}: {before.get(k)!r}->{after[k]!r}" for k in after if before.get(k) != after[k]
             )
+            # artifacts store absolute paths from the host that ran them; the file name is
+            # what identifies the patch (and keeps local usernames out of screenshots).
+            patch_name = str(d.get("path") or "?").replace("\\", "/").rsplit("/", 1)[-1]
             lines.append(
                 f"**Attempt {d['attempt']}** · 💾 patched `{d['failure_key']}` → "
-                f"`{d['path']}`\n   `{changed}`"
+                f"`{patch_name}`\n   `{changed}`"
             )
         elif ev.type == "retry_scheduled":
             lines.append(f"🔁 relaunching (attempt {d['next_attempt']})")

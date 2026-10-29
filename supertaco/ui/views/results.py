@@ -83,6 +83,9 @@ def render_results() -> None:
             if isinstance(e, dict)
         ]
         components.render_phase_timeline(events)
+        healed = bool(art.get("healed"))
+        with st.expander("🩹 Heal timeline" if healed else "🕓 Attempt timeline", expanded=healed):
+            st.markdown(report.render_events_markdown(events))
         with st.expander("🔎 Verify this run"):
             st.code(data_mod.verify_commands(str(art.get("run_id", "?"))), language="bash")
         with st.expander("🧠 LLM calls"):

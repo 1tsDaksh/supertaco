@@ -9,7 +9,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from supertaco.loop import Event
-from supertaco.ui import components, live_state, theme
+from supertaco.ui import components, live_state, report, theme
 from supertaco.ui import data as data_mod
 from supertaco.ui.views import landing
 
@@ -340,6 +340,90 @@ def test_results_page_lists_runs_and_verify(at_app, tmp_path, monkeypatch):
     df = next(d for d in at_app.dataframe if "run" in d.value.columns)
     assert "swzz01" in list(df.value["run"])
     assert any("Verify this run" in e.label for e in at_app.expander)
+
+
+def test_results_page_shows_heal_timeline_for_healed_run(at_app, tmp_path, monkeypatch):
+    healed = _artifact("swheal1", delta=0.4)
+    healed.update(
+        attempts=2,
+        healed=True,
+        events=[
+            {
+                "type": "job_launched",
+                "data": {
+                    "attempt": 1,
+                    "payload": {"model": "Qwen/Qwen2.5-1.5B-Instruct", "config": {"a": 1}},
+                },
+            },
+            {"type": "failure_detected", "data": {"attempt": 1, "failure_key": "EVAL_REGRESSION"}},
+            {
+                "type": "patch_written",
+                "data": {
+                    "attempt": 1,
+                    "failure_key": "EVAL_REGRESSION",
+                    "path": "configs/runs/x_patched.yaml",
+                    "before": {"learning_rate": 0.0002, "lora_r": 8},
+                    "after": {"learning_rate": 0.0001, "lora_r": 4},
+                },
+            },
+            {"type": "retry_scheduled", "data": {"next_attempt": 2}},
+            {"type": "run_succeeded", "data": {"attempts": 2}},
+        ],
+    )
+    runs = tmp_path / "logs" / "runs"
+    runs.mkdir(parents=True)
+    (runs / "heal.json").write_text(json.dumps(healed), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    at_app.session_state["nav_page"] = "📊 Results"
+    at_app.run()
+    assert not at_app.exception, [e.value for e in at_app.exception]
+    md = "\n".join(m.value for m in at_app.markdown)
+    assert "EVAL_REGRESSION" in md  # the failure that triggered the heal
+    assert "Healed** after 2 attempt" in md
+    assert "0.0002->0.0001" in md  # the actual knobs the patcher changed
+    assert any("Heal timeline" in e.label for e in at_app.expander)
+
+
+def test_results_page_keeps_timeline_collapsed_for_unhealed_run(at_app, tmp_path, monkeypatch):
+    plain = _artifact("swok01")
+    plain["events"] = [
+        {
+            "type": "job_launched",
+            "data": {"attempt": 1, "payload": {"model": "m", "config": {"a": 1}}},
+        },
+        {"type": "run_succeeded", "data": {"attempts": 1}},
+    ]
+    runs = tmp_path / "logs" / "runs"
+    runs.mkdir(parents=True)
+    (runs / "ok.json").write_text(json.dumps(plain), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    at_app.session_state["nav_page"] = "📊 Results"
+    at_app.run()
+    assert not at_app.exception, [e.value for e in at_app.exception]
+    expanders = {e.label: e for e in at_app.expander}
+    assert "🕓 Attempt timeline" in expanders  # no heal, so the neutral label
+    assert not any("Heal timeline" in label for label in expanders)
+    md = "\n".join(m.value for m in at_app.markdown)
+    assert "Succeeded** on first attempt" in md
+
+
+def test_timeline_shortens_patch_paths_and_keeps_knob_deltas():
+    events = [
+        SimpleNamespace(
+            type="patch_written",
+            data={
+                "attempt": 1,
+                "failure_key": "OOM",
+                "path": "C:\\Users\\someone\\repo\\configs\\runs\\20261023_112422_OOM_patched.yaml",
+                "before": {"batch_size": 4, "lora_r": 8},
+                "after": {"batch_size": 2, "lora_r": 8},
+            },
+        )
+    ]
+    md = report.render_events_markdown(events)
+    assert "20261023_112422_OOM_patched.yaml" in md
+    assert "someone" not in md  # host paths stay out of the report
+    assert "batch_size: 4->2" in md and "lora_r" not in md  # only changed knobs listed
 
 
 def test_results_page_empty_state(at_app):
